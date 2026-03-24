@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
@@ -18,6 +18,60 @@ export default function Home() {
   const { addInspiration } = useInspirationStore();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // 当选择小说时，从后端加载已保存的数据
+  useEffect(() => {
+    if (!currentNovel) {
+      // 清空数据
+      setCharacters([]);
+      setRelations([]);
+      setPlotNodes([]);
+      setPlotConnections([]);
+      return;
+    }
+
+    const loadSavedData = async () => {
+      setIsLoadingData(true);
+      try {
+        // 并行加载人物和情节数据
+        const [charRes, plotRes] = await Promise.all([
+          fetch(`${API_URL}/characters?novel_id=${currentNovel.id}`),
+          fetch(`${API_URL}/plots?novel_id=${currentNovel.id}`),
+        ]);
+
+        if (charRes.ok) {
+          const charData = await charRes.json();
+          setCharacters(charData || []);
+        }
+
+        if (plotRes.ok) {
+          const plotData = await plotRes.json();
+          setPlotNodes(plotData || []);
+        }
+
+        // 加载关系数据
+        const relRes = await fetch(`${API_URL}/characters/relations?novel_id=${currentNovel.id}`);
+        if (relRes.ok) {
+          const relData = await relRes.json();
+          setRelations(relData || []);
+        }
+
+        // 加载情节连接
+        const connRes = await fetch(`${API_URL}/plots/connections?novel_id=${currentNovel.id}`);
+        if (connRes.ok) {
+          const connData = await connRes.json();
+          setPlotConnections(connData || []);
+        }
+      } catch (error) {
+        console.error('加载保存的数据失败:', error);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    loadSavedData();
+  }, [currentNovel, setCharacters, setRelations, setPlotNodes, setPlotConnections]);
 
   // AI分析人物
   const handleAnalyzeCharacters = async () => {
