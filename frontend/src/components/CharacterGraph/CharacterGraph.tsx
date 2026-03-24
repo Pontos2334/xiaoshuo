@@ -281,7 +281,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
 
               <div>
                 <h4 className="text-sm font-medium mb-1">故事简介</h4>
-                <p className="text-sm text-muted-foreground">{selectedCharacter.storySummary || selectedCharacter.story_summary || '暂无'}</p>
+                <p className="text-sm text-muted-foreground">{selectedCharacter.storySummary || (selectedCharacter as Character & { story_summary?: string }).story_summary || '暂无'}</p>
               </div>
 
               <div className="flex gap-2 pt-4">

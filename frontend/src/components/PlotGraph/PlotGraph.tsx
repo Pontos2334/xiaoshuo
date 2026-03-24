@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState, useRef } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import {
   ReactFlow,
   Node,
@@ -196,15 +196,15 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
     const validEdges: Edge[] = [];
 
     plotConnections.forEach((conn) => {
-      let sourceId = conn.sourceId || conn.source_id;
-      let targetId = conn.targetId || conn.target_id;
+      let sourceId = conn.sourceId || (conn as PlotConnection & { source_id?: string }).source_id;
+      let targetId = conn.targetId || (conn as PlotConnection & { target_id?: string }).target_id;
 
       // 如果不是有效的ID，尝试通过引用查找
-      if (!plotNodes.find(n => n.id === sourceId)) {
+      if (sourceId && !plotNodes.find(n => n.id === sourceId)) {
         const found = findPlotId(sourceId, plotNodes);
         if (found) sourceId = found;
       }
-      if (!plotNodes.find(n => n.id === targetId)) {
+      if (targetId && !plotNodes.find(n => n.id === targetId)) {
         const found = findPlotId(targetId, plotNodes);
         if (found) targetId = found;
       }
@@ -214,7 +214,7 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
           plotNodes.find(n => n.id === sourceId) &&
           plotNodes.find(n => n.id === targetId) &&
           sourceId !== targetId) {
-        const connType = conn.connectionType || conn.connection_type || 'next';
+        const connType = conn.connectionType || (conn as PlotConnection & { connection_type?: string }).connection_type || 'next';
         const style = connectionStyles[connType] || { stroke: '#94a3b8', label: '关联' };
 
         validEdges.push({

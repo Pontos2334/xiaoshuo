@@ -45,6 +45,10 @@ export interface PlotConnection {
   targetId: string;
   connectionType: 'cause' | 'parallel' | 'foreshadow' | 'flashback' | 'next';
   description: string;
+  // 后端 snake_case 兼容
+  source_id?: string;
+  target_id?: string;
+  connection_type?: string;
 }
 
 // 小说类型
