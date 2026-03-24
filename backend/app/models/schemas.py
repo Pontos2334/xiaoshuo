@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import json
 
 
 # ========== 小说相关 ==========
@@ -30,7 +31,7 @@ class NovelResponse(NovelBase):
 class CharacterBase(BaseModel):
     name: str
     aliases: List[str] = []
-    basic_info: Dict[str, Any] = {}
+    basic_info: Optional[Dict[str, Any] | str] = None
     personality: List[str] = []
     abilities: List[str] = []
     story_summary: Optional[str] = None
@@ -59,6 +60,28 @@ class CharacterResponse(CharacterBase):
 
     class Config:
         from_attributes = True
+
+    @field_validator('basic_info', mode='before')
+    @classmethod
+    def parse_basic_info(cls, v):
+        """自动解析 basic_info JSON 字符串"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v if v else {}
+
+    @field_validator('aliases', 'personality', 'abilities', mode='before')
+    @classmethod
+    def parse_list_fields(cls, v):
+        """自动解析列表字段 JSON 字符串"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return []
+        return v if v else []
 
 
 # ========== 人物关系相关 ==========
@@ -151,8 +174,9 @@ class PlotConnectionResponse(PlotConnectionBase):
 # ========== 灵感相关 ==========
 class InspirationRequest(BaseModel):
     novel_id: Optional[str] = None
-    type: str  # plot, continue, character, emotion
-    target_id: Optional[str] = None
+    type: str  # scene, plot, continue, character, emotion
+    target_id: Optional[str] = None  # 兼容单个ID
+    target_ids: Optional[List[str]] = None  # 支持多个ID
     context: Optional[str] = None
 
 

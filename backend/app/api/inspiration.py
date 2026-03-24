@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.models.database import get_db
 from app.models.models import Inspiration, Novel, Character, PlotNode
@@ -10,30 +10,87 @@ from app.services.inspiration_gen import InspirationGenerator
 router = APIRouter()
 
 
+def get_targets_by_ids(db: Session, target_ids: List[str]):
+    """根据 ID 列表获取人物和情节"""
+    characters = []
+    plot_nodes = []
+
+    for target_id in target_ids:
+        # 尝试作为人物查找
+        char = db.query(Character).filter(Character.id == target_id).first()
+        if char:
+            characters.append(char)
+            continue
+
+        # 尝试作为情节查找
+        plot = db.query(PlotNode).filter(PlotNode.id == target_id).first()
+        if plot:
+            plot_nodes.append(plot)
+
+    return characters, plot_nodes
+
+
+@router.post("/scene", response_model=ApiResponse)
+async def get_scene_inspiration(
+    request: InspirationRequest,
+    db: Session = Depends(get_db)
+):
+    """基于选定的人物和情节生成场景灵感"""
+    # 合并 target_id 和 target_ids
+    target_ids = request.target_ids or []
+    if request.target_id and request.target_id not in target_ids:
+        target_ids.append(request.target_id)
+
+    characters, plot_nodes = get_targets_by_ids(db, target_ids)
+
+    # 生成灵感
+    generator = InspirationGenerator()
+    inspiration_content = await generator.generate_scene_inspiration(
+        characters=characters,
+        plot_nodes=plot_nodes,
+        context=request.context
+    )
+
+    # 保存灵感
+    inspiration = Inspiration(
+        novel_id=request.novel_id,
+        type="scene",
+        target_id=request.target_id,
+        content=inspiration_content
+    )
+    db.add(inspiration)
+    db.commit()
+    db.refresh(inspiration)
+
+    return ApiResponse(
+        success=True,
+        data=InspirationResponse.model_validate(inspiration).model_dump()
+    )
+
+
 @router.post("/plot", response_model=ApiResponse)
 async def get_plot_inspiration(
     request: InspirationRequest,
     db: Session = Depends(get_db)
 ):
     """为指定情节生成灵感"""
-    # 获取情节节点
-    plot_node = None
-    if request.target_id:
-        plot_node = db.query(PlotNode).filter(PlotNode.id == request.target_id).first()
-        if not plot_node:
-            raise HTTPException(status_code=404, detail="情节节点不存在")
+    # 合并 target_id 和 target_ids
+    target_ids = request.target_ids or []
+    if request.target_id and request.target_id not in target_ids:
+        target_ids.append(request.target_id)
 
-    # 获取相关上下文
-    characters = []
-    if plot_node and plot_node.characters:
-        characters = db.query(Character).filter(
-            Character.id.in_(plot_node.characters)
-        ).all()
+    characters, plot_nodes = get_targets_by_ids(db, target_ids)
+
+    # 如果没有指定情节，尝试获取所有情节
+    if not plot_nodes and request.novel_id:
+        plot_nodes = db.query(PlotNode).filter(
+            PlotNode.novel_id == request.novel_id
+        ).all()[:5]  # 限制数量
 
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_plot_inspiration(
-        plot_node=plot_node,
+        plot_nodes=plot_nodes,
         characters=characters,
         context=request.context
     )
@@ -61,18 +118,23 @@ async def get_continue_inspiration(
     db: Session = Depends(get_db)
 ):
     """生成后续情节发展建议"""
-    novel = None
+    # 合并 target_id 和 target_ids
+    target_ids = request.target_ids or []
+    if request.target_id and request.target_id not in target_ids:
+        target_ids.append(request.target_id)
+
+    characters, plot_nodes = get_targets_by_ids(db, target_ids)
+
+    # 如果没有指定，获取所有人物和情节
     if request.novel_id:
-        novel = db.query(Novel).filter(Novel.id == request.novel_id).first()
-
-    # 获取所有人物和情节
-    characters = db.query(Character).filter(
-        Character.novel_id == request.novel_id
-    ).all() if request.novel_id else []
-
-    plot_nodes = db.query(PlotNode).filter(
-        PlotNode.novel_id == request.novel_id
-    ).all() if request.novel_id else []
+        if not characters:
+            characters = db.query(Character).filter(
+                Character.novel_id == request.novel_id
+            ).all()
+        if not plot_nodes:
+            plot_nodes = db.query(PlotNode).filter(
+                PlotNode.novel_id == request.novel_id
+            ).all()
 
     # 生成灵感
     generator = InspirationGenerator()
@@ -104,16 +166,21 @@ async def get_character_inspiration(
     db: Session = Depends(get_db)
 ):
     """为指定角色生成发展建议"""
-    character = None
-    if request.target_id:
-        character = db.query(Character).filter(Character.id == request.target_id).first()
-        if not character:
-            raise HTTPException(status_code=404, detail="角色不存在")
+    # 合并 target_id 和 target_ids
+    target_ids = request.target_ids or []
+    if request.target_id and request.target_id not in target_ids:
+        target_ids.append(request.target_id)
+
+    characters, plot_nodes = get_targets_by_ids(db, target_ids)
+
+    if not characters:
+        raise HTTPException(status_code=400, detail="请选择至少一个角色")
 
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_character_inspiration(
-        character=character,
+        characters=characters,
+        plot_nodes=plot_nodes,
         context=request.context
     )
 
@@ -140,16 +207,21 @@ async def get_emotion_inspiration(
     db: Session = Depends(get_db)
 ):
     """为指定情节生成情绪渲染建议"""
-    plot_node = None
-    if request.target_id:
-        plot_node = db.query(PlotNode).filter(PlotNode.id == request.target_id).first()
-        if not plot_node:
-            raise HTTPException(status_code=404, detail="情节节点不存在")
+    # 合并 target_id 和 target_ids
+    target_ids = request.target_ids or []
+    if request.target_id and request.target_id not in target_ids:
+        target_ids.append(request.target_id)
+
+    characters, plot_nodes = get_targets_by_ids(db, target_ids)
+
+    if not plot_nodes:
+        raise HTTPException(status_code=400, detail="请选择至少一个情节")
 
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_emotion_inspiration(
-        plot_node=plot_node,
+        plot_nodes=plot_nodes,
+        characters=characters,
         context=request.context
     )
 

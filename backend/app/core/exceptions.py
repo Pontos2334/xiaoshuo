@@ -62,7 +62,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
+    import traceback
+    logger.exception(f"Unhandled exception: {type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
         content={"success": False, "error": "服务器内部错误", "code": "INTERNAL_ERROR"}

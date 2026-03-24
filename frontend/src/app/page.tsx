@@ -174,16 +174,16 @@ export default function Home() {
   };
 
   // 生成灵感
-  const handleGenerateInspiration = async (type: string, targetId?: string, context?: string) => {
+  const handleGenerateInspiration = async (type: string, targetIds?: string[], context?: string) => {
     setIsAnalyzing(true);
     setStatusMessage('正在生成灵感...');
     try {
       const endpoint = `${API_URL}/inspiration/${type}`;
-      const body: Record<string, string | undefined> = {
-        type, // 添加 type 字段
+      const body: Record<string, string | string[] | undefined> = {
+        type,
       };
       if (currentNovel?.id) body.novel_id = currentNovel.id;
-      if (targetId) body.target_id = targetId;
+      if (targetIds && targetIds.length > 0) body.target_ids = targetIds;
       if (context) body.context = context;
 
       const response = await fetch(endpoint, {
@@ -195,8 +195,8 @@ export default function Home() {
       if (data.success && data.data) {
         addInspiration({
           id: Date.now().toString(),
-          type: type as 'plot' | 'continue' | 'character' | 'emotion',
-          targetId,
+          type: type as 'scene' | 'plot' | 'continue' | 'character' | 'emotion',
+          targetId: targetIds?.join(','),
           content: data.data.content || data.data,
           createdAt: new Date().toISOString(),
         });

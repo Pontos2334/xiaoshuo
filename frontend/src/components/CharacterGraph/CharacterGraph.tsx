@@ -1,7 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Graph } from '@antv/g6';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import {
+  ReactFlow,
+  Node,
+  Edge,
+  Background,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+  useReactFlow,
+  Panel,
+  Controls,
+} from '@xyflow/react';
+import dagre from 'dagre';
+import '@xyflow/react/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,198 +24,139 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useCharacterStore } from '@/stores';
 import { Character, CharacterRelation } from '@/types';
-import { RefreshCw, Edit2, Trash2, Loader2 } from 'lucide-react';
+import { RefreshCw, Edit2, Trash2, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { CharacterNode } from './CharacterNode';
 
 interface CharacterGraphProps {
   onAnalyze?: () => void;
   isAnalyzing?: boolean;
 }
 
-// 安全地检查和操作 graph
-function isGraphReady(graph: Graph | null): graph is Graph {
-  return graph !== null && !graph.destroyed;
+const nodeTypes = {
+  characterNode: CharacterNode,
+};
+
+// Dagre 布局配置
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+const nodeWidth = 150;
+const nodeHeight = 80;
+
+function getLayoutedElements(nodes: Node[], edges: Edge[], direction = 'TB') {
+  const isHorizontal = direction === 'LR';
+  dagreGraph.setGraph({ rankdir: direction, nodesep: 100, ranksep: 150 });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
 }
 
 export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const graphRef = useRef<Graph | null>(null);
-  const { characters, relations, selectedCharacter, setSelectedCharacter, updateCharacter, deleteCharacter } = useCharacterStore();
+  const {
+    characters,
+    relations,
+    selectedCharacter,
+    setSelectedCharacter,
+    updateCharacter,
+    deleteCharacter,
+  } = useCharacterStore();
+
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
-  const [graphReady, setGraphReady] = useState(false);
-
-  // 用于在点击事件中获取最新的 characters
   const charactersRef = useRef(characters);
+
   useEffect(() => {
     charactersRef.current = characters;
   }, [characters]);
 
-  // 初始化图谱
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // 如果已存在 graph 实例，先销毁
-    if (graphRef.current && !graphRef.current.destroyed) {
-      graphRef.current.destroy();
-      graphRef.current = null;
-    }
-
-    const graph = new Graph({
-      container: container,
-      width: container.clientWidth,
-      height: container.clientHeight || 500,
-      autoFit: 'view',
-      padding: 20,
-      behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
-      node: {
-        style: {
-          size: (d: Record<string, unknown>) => {
-            // 根据关系数量调整节点大小
-            const data = d.data as Character;
-            const relCount = relations.filter(r => r.sourceId === data?.id || r.targetId === data?.id).length;
-            return Math.max(50, 50 + relCount * 5);
-          },
-          fill: '#5B8FF9',
-          stroke: '#1890ff',
-          lineWidth: 2,
-          radius: 8,
-          labelText: (d: Record<string, unknown>) => (d.data as { name?: string })?.name || '',
-          labelFill: '#fff',
-          labelFontSize: 12,
-          labelPlacement: 'center',
-        },
-        state: {
-          selected: {
-            lineWidth: 4,
-            stroke: '#faad14',
-          },
-        },
-      },
-      edge: {
-        style: {
-          stroke: '#A0AEC0',
-          lineWidth: 2,
-          endArrow: true,
-          labelText: (d: Record<string, unknown>) => (d.data as { relationType?: string })?.relationType || '',
-          labelFill: '#666',
-          labelFontSize: 10,
-        },
-      },
-      layout: {
-        type: 'force',
-        preventOverlap: true,
-        nodeStrength: -500,
-        edgeStrength: 0.2,
-        linkDistance: 150,
-        nodeSpacing: 100,
-      },
-    });
-
-    graphRef.current = graph;
-
-    // 节点点击事件 - 使用 ref 获取最新的 characters
-    graph.on('node:click', (event: unknown) => {
-      const evt = event as { target: { id: string } };
-      const nodeId = evt.target.id;
-      const character = charactersRef.current.find(c => c.id === nodeId);
-      if (character) {
-        setSelectedCharacter(character);
-      }
-    });
-
-    // 标记 graph 已就绪
-    setGraphReady(true);
-
-    return () => {
-      if (graphRef.current && !graphRef.current.destroyed) {
-        graphRef.current.destroy();
-      }
-      graphRef.current = null;
-      setGraphReady(false);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 辅助函数：通过名称或ID找到人物ID
-  const findCharacterId = (ref: string): string | null => {
-    const char = characters.find(c =>
-      c.id === ref ||
-      c.name === ref ||
-      c.name?.includes(ref.replace('ID', '').replace('人物', '')) ||
-      ref.includes(c.name || '')
-    );
-    return char?.id || null;
-  };
-
-  // 更新图谱数据
-  useEffect(() => {
-    if (!graphReady || !isGraphReady(graphRef.current)) return;
-
-    const graph = graphRef.current;
-
-    const nodes = characters.map(char => ({
+  // 转换为 React Flow 格式并应用布局
+  const { initialNodes, initialEdges } = useMemo(() => {
+    const nodes: Node[] = characters.map((char) => ({
       id: char.id,
+      type: 'characterNode',
+      position: { x: 0, y: 0 }, // 将由 dagre 计算
       data: char,
     }));
 
-    // 处理关系数据，通过名称匹配ID
-    const validEdges: Array<{
-      id: string;
-      source: string;
-      target: string;
-      data: CharacterRelation;
-    }> = [];
+    // 过滤有效的边
+    const validEdges: Edge[] = relations
+      .filter((rel) => {
+        const sourceId = rel.sourceId || rel.source_id;
+        const targetId = rel.targetId || rel.target_id;
+        return (
+          sourceId &&
+          targetId &&
+          characters.find((c) => c.id === sourceId) &&
+          characters.find((c) => c.id === targetId) &&
+          sourceId !== targetId
+        );
+      })
+      .map((rel) => ({
+        id: rel.id,
+        source: rel.sourceId || rel.source_id || '',
+        target: rel.targetId || rel.target_id || '',
+        label: rel.relationType || rel.relation_type || '关联',
+        style: { stroke: '#6366f1', strokeWidth: 2 },
+        labelStyle: { fill: '#6366f1', fontWeight: 500, fontSize: 11 },
+        labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+        labelBgPadding: [4, 2] as [number, number],
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' },
+      }));
 
-    relations.forEach(rel => {
-      let sourceId = rel.sourceId;
-      let targetId = rel.targetId;
+    // 应用 dagre 布局
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      nodes,
+      validEdges,
+      'LR' // 从左到右布局
+    );
 
-      // 如果 sourceId/targetId 不是有效的人物ID，尝试通过名称匹配
-      if (!characters.find(c => c.id === sourceId)) {
-        const matched = findCharacterId(sourceId);
-        if (matched) sourceId = matched;
+    return { initialNodes: layoutedNodes, initialEdges: layoutedEdges };
+  }, [characters, relations]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // 当数据变化时更新节点和边
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      const character = charactersRef.current.find((c) => c.id === node.id);
+      if (character) {
+        setSelectedCharacter(character);
       }
-      if (!characters.find(c => c.id === targetId)) {
-        const matched = findCharacterId(targetId);
-        if (matched) targetId = matched;
-      }
+    },
+    [setSelectedCharacter]
+  );
 
-      // 只有当 sourceId 和 targetId 都是有效的人物ID 时才添加边
-      if (sourceId && targetId &&
-          characters.find(c => c.id === sourceId) &&
-          characters.find(c => c.id === targetId) &&
-          sourceId !== targetId) {
-        validEdges.push({
-          id: rel.id,
-          source: sourceId,
-          target: targetId,
-          data: rel,
-        });
-      }
-    });
-
-    try {
-      graph.setData({
-        nodes,
-        edges: validEdges,
-      });
-      graph.render();
-    } catch (error) {
-      // 忽略已销毁实例的错误
-      if (!graph.destroyed) {
-        console.warn('Graph render error:', error);
-      }
-    }
-  }, [graphReady, characters, relations]);
-
-  // 打开编辑对话框
   const handleEdit = useCallback((character: Character) => {
     setEditingCharacter({ ...character });
     setEditDialogOpen(true);
   }, []);
 
-  // 保存编辑
   const handleSaveEdit = useCallback(() => {
     if (editingCharacter) {
       updateCharacter(editingCharacter.id, editingCharacter);
@@ -210,12 +165,14 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
     }
   }, [editingCharacter, updateCharacter]);
 
-  // 删除人物
-  const handleDelete = useCallback((id: string) => {
-    if (confirm('确定要删除这个人物吗？')) {
-      deleteCharacter(id);
-    }
-  }, [deleteCharacter]);
+  const handleDelete = useCallback(
+    (id: string) => {
+      if (confirm('确定要删除这个人物吗？')) {
+        deleteCharacter(id);
+      }
+    },
+    [deleteCharacter]
+  );
 
   return (
     <div className="h-full flex gap-4">
@@ -235,16 +192,42 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div ref={containerRef} className="w-full h-[500px]" />
+          <div className="h-[500px]">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={onNodeClick}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.3}
+              maxZoom={2}
+            >
+              <Controls showInteractive={false} />
+              <MiniMap
+                pannable
+                zoomable
+                nodeColor={(node) => {
+                  const data = node.data as Character;
+                  const colors: Record<string, string> = {
+                    '正义': '#93c5fd',
+                    '邪恶': '#fca5a5',
+                    '中立': '#d1d5db',
+                  };
+                  return colors[data?.basicInfo?.身份] || '#c7d2fe';
+                }}
+              />
+              <Background gap={16} size={1} />
+            </ReactFlow>
+          </div>
         </CardContent>
       </Card>
 
       {/* 人物详情面板 */}
       <Card className="w-80">
         <CardHeader>
-          <CardTitle>
-            {selectedCharacter ? selectedCharacter.name : '选择人物'}
-          </CardTitle>
+          <CardTitle>{selectedCharacter ? selectedCharacter.name : '选择人物'}</CardTitle>
         </CardHeader>
         <CardContent>
           {selectedCharacter ? (
@@ -252,12 +235,14 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
               <div>
                 <h4 className="text-sm font-medium mb-1">基本信息</h4>
                 <div className="space-y-1">
-                  {Object.entries(selectedCharacter.basicInfo || selectedCharacter.basic_info || {}).map(([key, value]) => (
-                    <div key={key} className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{key}</span>
-                      <span>{String(value)}</span>
-                    </div>
-                  ))}
+                  {Object.entries(selectedCharacter.basicInfo || selectedCharacter.basic_info || {}).map(
+                    ([key, value]) => (
+                      <div key={key} className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">{key}</span>
+                        <span>{String(value)}</span>
+                      </div>
+                    )
+                  )}
                 </div>
               </div>
 
@@ -265,7 +250,9 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
                 <h4 className="text-sm font-medium mb-1">性格特点</h4>
                 <div className="flex flex-wrap gap-1">
                   {(selectedCharacter.personality || []).map((p, i) => (
-                    <Badge key={i} variant="secondary">{p}</Badge>
+                    <Badge key={i} variant="secondary">
+                      {p}
+                    </Badge>
                   ))}
                 </div>
               </div>
@@ -274,14 +261,20 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
                 <h4 className="text-sm font-medium mb-1">能力</h4>
                 <div className="flex flex-wrap gap-1">
                   {(selectedCharacter.abilities || []).map((a, i) => (
-                    <Badge key={i} variant="outline">{a}</Badge>
+                    <Badge key={i} variant="outline">
+                      {a}
+                    </Badge>
                   ))}
                 </div>
               </div>
 
               <div>
                 <h4 className="text-sm font-medium mb-1">故事简介</h4>
-                <p className="text-sm text-muted-foreground">{selectedCharacter.storySummary || (selectedCharacter as Character & { story_summary?: string }).story_summary || '暂无'}</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedCharacter.storySummary ||
+                    (selectedCharacter as Character & { story_summary?: string }).story_summary ||
+                    '暂无'}
+                </p>
               </div>
 
               <div className="flex gap-2 pt-4">
@@ -296,9 +289,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
               </div>
             </div>
           ) : (
-            <div className="text-center text-muted-foreground py-8">
-              点击图谱中的人物节点查看详情
-            </div>
+            <div className="text-center text-muted-foreground py-8">点击图谱中的人物节点查看详情</div>
           )}
         </CardContent>
       </Card>
@@ -330,9 +321,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
                 <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
                   取消
                 </Button>
-                <Button onClick={handleSaveEdit}>
-                  保存
-                </Button>
+                <Button onClick={handleSaveEdit}>保存</Button>
               </div>
             </div>
           )}

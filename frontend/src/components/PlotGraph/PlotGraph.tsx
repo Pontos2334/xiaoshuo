@@ -12,101 +12,67 @@ import {
   MarkerType,
   useReactFlow,
   Panel,
+  Controls,
 } from '@xyflow/react';
-import { ZoomIn, ZoomOut, Maximize2, Lock, Unlock, RefreshCw, Loader2, Edit2, Trash2 } from 'lucide-react';
+import dagre from 'dagre';
 import '@xyflow/react/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { usePlotStore } from '@/stores';
 import { PlotNode as PlotNodeType, PlotConnection } from '@/types';
+import { RefreshCw, Edit2, Trash2, Loader2 } from 'lucide-react';
+import { PlotNodeComponent } from './PlotNode';
 
 interface PlotGraphProps {
   onAnalyze?: () => void;
   isAnalyzing?: boolean;
 }
 
-// 情节节点组件
-function PlotNodeComponent({ data }: { data: PlotNodeType }) {
-  const emotionColors: Record<string, string> = {
-    '紧张': 'bg-red-100 border-red-300',
-    '温馨': 'bg-pink-100 border-pink-300',
-    '悲伤': 'bg-blue-100 border-blue-300',
-    '欢乐': 'bg-yellow-100 border-yellow-300',
-    '愤怒': 'bg-orange-100 border-orange-300',
-    '平静': 'bg-green-100 border-green-300',
-  };
-
-  return (
-    <div className={`px-4 py-2 rounded-md border-2 min-w-[150px] ${emotionColors[data.emotion] || 'bg-gray-100 border-gray-300'}`}>
-      <div className="font-semibold text-sm">{data.title}</div>
-      <div className="text-xs text-muted-foreground">第{data.chapter}章</div>
-      <div className="flex gap-1 mt-1">
-        <Badge variant="outline" className="text-xs">{data.emotion}</Badge>
-      </div>
-    </div>
-  );
-}
-
 const nodeTypes = {
   plotNode: PlotNodeComponent,
 };
 
-// 自定义中文控制面板
-function CustomControls() {
-  const { zoomIn, zoomOut, fitView, zoomTo } = useReactFlow();
-  const [isLocked, setIsLocked] = useState(false);
+// Dagre 布局配置
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-  return (
-    <Panel position="bottom-left" className="flex gap-1 bg-white rounded-md shadow-md p-1">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => zoomIn()}
-        title="放大"
-        className="h-8 w-8 p-0"
-      >
-        <ZoomIn className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => zoomOut()}
-        title="缩小"
-        className="h-8 w-8 p-0"
-      >
-        <ZoomOut className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => fitView()}
-        title="适应视图"
-        className="h-8 w-8 p-0"
-      >
-        <Maximize2 className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          setIsLocked(!isLocked);
-          zoomTo(1);
-        }}
-        title={isLocked ? '解锁' : '锁定'}
-        className="h-8 w-8 p-0"
-      >
-        {isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-      </Button>
-    </Panel>
-  );
-}
+const nodeWidth = 180;
+const nodeHeight = 100;
 
 // 辅助函数：从章节字符串中提取数字用于排序
 function extractChapterNumber(chapter: string): number {
   if (!chapter) return 999;
   const match = chapter.match(/\d+/);
   return match ? parseInt(match[0], 10) : 999;
+}
+
+function getLayoutedElements(nodes: Node[], edges: Edge[], direction = 'LR') {
+  const isHorizontal = direction === 'LR';
+  dagreGraph.setGraph({ rankdir: direction, nodesep: 120, ranksep: 180 });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
 }
 
 // 辅助函数：通过标题或ID找到真正的情节ID
@@ -121,21 +87,10 @@ function findPlotId(ref: string, nodes: PlotNodeType[]): string | null {
   const titleMatch = nodes.find(n => n.title === ref);
   if (titleMatch) return titleMatch.id;
 
-  // 模糊匹配（处理 "情节1ID"、"命运的开端ID" 等情况）
+  // 模糊匹配
   for (const node of nodes) {
     if (node.title && (node.title.includes(ref) || ref.includes(node.title))) {
       return node.id;
-    }
-    // 处理 "情节1" 这种格式
-    const plotNumMatch = ref.match(/情节(\d+)/);
-    if (plotNumMatch) {
-      const num = parseInt(plotNumMatch[1]);
-      const sortedNodes = [...nodes].sort((a, b) =>
-        extractChapterNumber(a.chapter) - extractChapterNumber(b.chapter)
-      );
-      if (sortedNodes[num - 1] && num <= sortedNodes.length) {
-        return sortedNodes[num - 1].id;
-      }
     }
   }
 
@@ -143,48 +98,32 @@ function findPlotId(ref: string, nodes: PlotNodeType[]): string | null {
 }
 
 export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
-  const { plotNodes, plotConnections, selectedPlotNode, setSelectedPlotNode, updatePlotNode, deletePlotNode } = usePlotStore();
+  const { plotNodes, plotConnections, selectedPlotNode, setSelectedPlotNode, deletePlotNode } = usePlotStore();
   const plotNodesRef = useRef(plotNodes);
 
-  // 更新 ref
   useEffect(() => {
     plotNodesRef.current = plotNodes;
   }, [plotNodes]);
 
-  // 转换为React Flow格式
-  const initialNodes: Node[] = useMemo(() => {
-    if (plotNodes.length === 0) return [];
+  // 转换为 React Flow 格式并应用布局
+  const { initialNodes, initialEdges } = useMemo(() => {
+    if (plotNodes.length === 0) {
+      return { initialNodes: [], initialEdges: [] };
+    }
 
     // 按章节排序
     const sortedNodes = [...plotNodes].sort((a, b) =>
       extractChapterNumber(a.chapter) - extractChapterNumber(b.chapter)
     );
 
-    // 计算布局：按时间线从左到右排列
-    const nodeWidth = 180;
-    const nodeHeight = 100;
-    const horizontalGap = 100;
-    const verticalGap = 150;
-    const nodesPerRow = 4;
+    const nodes: Node[] = sortedNodes.map((node) => ({
+      id: node.id,
+      type: 'plotNode',
+      position: { x: 0, y: 0 },
+      data: node,
+    }));
 
-    return sortedNodes.map((node, index) => {
-      const row = Math.floor(index / nodesPerRow);
-      const col = index % nodesPerRow;
-      const x = col * (nodeWidth + horizontalGap) + 50;
-      const y = row * (nodeHeight + verticalGap) + 50;
-
-      return {
-        id: node.id,
-        type: 'plotNode',
-        position: { x, y },
-        data: node,
-      };
-    });
-  }, [plotNodes]);
-
-  const initialEdges: Edge[] = useMemo(() => {
-    if (plotConnections.length === 0 || plotNodes.length === 0) return [];
-
+    // 连接样式
     const connectionStyles: Record<string, { stroke: string; label: string }> = {
       'cause': { stroke: '#ef4444', label: '因果' },
       'parallel': { stroke: '#22c55e', label: '并行' },
@@ -193,8 +132,10 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
       'next': { stroke: '#3b82f6', label: '后续' },
     };
 
+    // 过滤有效的边
     const validEdges: Edge[] = [];
 
+    // 首先添加数据库中的连接
     plotConnections.forEach((conn) => {
       let sourceId = conn.sourceId || (conn as PlotConnection & { source_id?: string }).source_id;
       let targetId = conn.targetId || (conn as PlotConnection & { target_id?: string }).target_id;
@@ -223,60 +164,68 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
           target: targetId,
           label: style.label,
           style: { stroke: style.stroke, strokeWidth: 2 },
-          labelStyle: { fill: style.stroke, fontWeight: 500 },
+          labelStyle: { fill: style.stroke, fontWeight: 500, fontSize: 11 },
+          labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+          labelBgPadding: [4, 2] as [number, number],
           markerEnd: { type: MarkerType.ArrowClosed, color: style.stroke },
         });
       }
     });
 
-    return validEdges;
-  }, [plotConnections, plotNodes]);
+    // 如果没有连接数据，自动生成主线连接（虚线）
+    if (validEdges.length === 0 && sortedNodes.length >= 2) {
+      for (let i = 0; i < sortedNodes.length - 1; i++) {
+        validEdges.push({
+          id: `auto-${sortedNodes[i].id}-${sortedNodes[i + 1].id}`,
+          source: sortedNodes[i].id,
+          target: sortedNodes[i + 1].id,
+          label: '时间线',
+          style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '5,5' },
+          labelStyle: { fill: '#94a3b8', fontWeight: 500, fontSize: 11 },
+          labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+          labelBgPadding: [4, 2] as [number, number],
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
+        });
+      }
+    }
 
-  // 自动生成主线连接（如果没有连接数据）
-  const autoEdges: Edge[] = useMemo(() => {
-    if (plotConnections.length > 0 || plotNodes.length < 2) return [];
-
-    // 按章节排序后，自动连接相邻的情节
-    const sortedNodes = [...plotNodes].sort((a, b) =>
-      extractChapterNumber(a.chapter) - extractChapterNumber(b.chapter)
+    // 应用 dagre 布局（从左到右，符合时间线）
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      nodes,
+      validEdges,
+      'LR'
     );
 
-    const edges: Edge[] = [];
-    for (let i = 0; i < sortedNodes.length - 1; i++) {
-      edges.push({
-        id: `auto-${sortedNodes[i].id}-${sortedNodes[i + 1].id}`,
-        source: sortedNodes[i].id,
-        target: sortedNodes[i + 1].id,
-        label: '后续',
-        style: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '5,5' },
-        labelStyle: { fill: '#3b82f6', fontWeight: 500 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-      });
-    }
-    return edges;
+    return { initialNodes: layoutedNodes, initialEdges: layoutedEdges };
   }, [plotNodes, plotConnections]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // 合并边：初始边 + 自动生成的边
+  // 当数据变化时更新节点和边
   useEffect(() => {
-    const allEdges = [...initialEdges, ...autoEdges];
-    setEdges(allEdges);
-  }, [initialEdges, autoEdges, setEdges]);
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
-  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    const plotNode = plotNodesRef.current.find((p) => p.id === node.id);
-    if (plotNode) {
-      setSelectedPlotNode(plotNode);
-    }
-  }, [setSelectedPlotNode]);
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      const plotNode = plotNodesRef.current.find((p) => p.id === node.id);
+      if (plotNode) {
+        setSelectedPlotNode(plotNode);
+      }
+    },
+    [setSelectedPlotNode]
+  );
 
-  const handleDelete = (id: string) => {
-    if (confirm('确定要删除这个情节节点吗？')) {
-      deletePlotNode(id);
-    }
-  };
+  const handleDelete = useCallback(
+    (id: string) => {
+      if (confirm('确定要删除这个情节节点吗？')) {
+        deletePlotNode(id);
+      }
+    },
+    [deletePlotNode]
+  );
 
   return (
     <div className="h-full flex gap-4">
@@ -305,8 +254,10 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
               onNodeClick={onNodeClick}
               nodeTypes={nodeTypes}
               fitView
+              minZoom={0.3}
+              maxZoom={2}
             >
-              <CustomControls />
+              <Controls showInteractive={false} />
               <MiniMap
                 pannable
                 zoomable
@@ -323,7 +274,7 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
                   return emotions[data?.emotion] || '#e5e7eb';
                 }}
               />
-              <Background />
+              <Background gap={16} size={1} />
             </ReactFlow>
           </div>
         </CardContent>
@@ -370,7 +321,7 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
                     <div
                       key={i}
                       className={`w-2 h-4 rounded ${
-                        i < selectedPlotNode.importance ? 'bg-primary' : 'bg-muted'
+                        i < (selectedPlotNode.importance || 5) ? 'bg-primary' : 'bg-muted'
                       }`}
                     />
                   ))}

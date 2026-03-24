@@ -51,13 +51,37 @@ export function MainLayout({ children }: MainLayoutProps) {
   const [folderPath, setFolderPath] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // 加载上次保存的路径
+  // 加载已保存的小说列表
   useEffect(() => {
-    const savedPath = localStorage.getItem(LAST_PATH_KEY);
-    if (savedPath) {
-      setFolderPath(savedPath);
-    }
-  }, []);
+    const loadSavedNovels = async () => {
+      try {
+        const response = await fetch(`${API_URL}/files/novels`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.length > 0) {
+            setNovels(data);
+            // 如果有保存的路径，尝试选择对应的小说
+            const savedPath = localStorage.getItem(LAST_PATH_KEY);
+            if (savedPath) {
+              const savedNovel = data.find((n: { name: string; path: string }) =>
+                n.name === savedPath || n.path.includes(savedPath)
+              );
+              if (savedNovel) {
+                setCurrentNovel(savedNovel);
+              } else {
+                setCurrentNovel(data[0]);
+              }
+            } else {
+              setCurrentNovel(data[0]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('加载已保存的小说失败:', error);
+      }
+    };
+    loadSavedNovels();
+  }, [setNovels, setCurrentNovel]);
 
   // 使用系统文件选择器
   const handleSelectFolder = async () => {
@@ -237,8 +261,8 @@ export function MainLayout({ children }: MainLayoutProps) {
 
         {/* Content Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="flex-1 flex flex-col">
-            <div className="border-b px-4">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="flex-1 flex flex-col overflow-hidden">
+            <div className="border-b px-4 shrink-0">
               <TabsList>
                 <TabsTrigger value="characters" className="gap-2">
                   <Users className="h-4 w-4" />
@@ -271,12 +295,8 @@ export function MainLayout({ children }: MainLayoutProps) {
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="inspiration" className="flex-1 m-0 overflow-hidden">
-              <ScrollArea className="h-full">
-                <div className="p-4">
-                  {children}
-                </div>
-              </ScrollArea>
+            <TabsContent value="inspiration" className="flex-1 m-0 overflow-auto p-4">
+              {children}
             </TabsContent>
           </Tabs>
         </main>

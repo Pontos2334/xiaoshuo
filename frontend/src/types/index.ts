@@ -72,8 +72,8 @@ export interface Novel {
 export interface Inspiration {
   id: string;
   novelId?: string;
-  type: 'plot' | 'continue' | 'character' | 'emotion';
-  targetId?: string; // 关联的情节/人物ID
+  type: 'scene' | 'plot' | 'continue' | 'character' | 'emotion';
+  targetId?: string; // 关联的情节/人物ID（多个用逗号分隔）
   content: string;
   createdAt: string;
 }
