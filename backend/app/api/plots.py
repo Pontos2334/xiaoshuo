@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from typing import List
+import logging
 
 from app.models.database import get_db
 from app.models.models import PlotNode, PlotConnection, Novel
@@ -14,8 +15,10 @@ from app.models.schemas import (
     ApiResponse
 )
 from app.services.plot_analyzer import PlotAnalyzer
+from app.core.file_utils import safe_read_file
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ========== 情节节点 API ==========
@@ -47,11 +50,9 @@ async def analyze_plots(novel_id: str, db: Session = Depends(get_db)):
     content = ""
     outline = ""
     if novel.content_path:
-        with open(novel.content_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = safe_read_file(novel.content_path)
     if novel.outline_path:
-        with open(novel.outline_path, "r", encoding="utf-8") as f:
-            outline = f.read()
+        outline = safe_read_file(novel.outline_path)
 
     # 使用AI分析
     analyzer = PlotAnalyzer()

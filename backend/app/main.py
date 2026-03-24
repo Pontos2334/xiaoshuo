@@ -1,7 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import files, characters, plots, inspiration
 from app.models.database import engine, Base
+from app.core.logging_config import setup_logging
+from app.core.exceptions import (
+    AppException,
+    app_exception_handler,
+    http_exception_handler,
+    generic_exception_handler
+)
+
+# 初始化日志
+setup_logging(level="INFO")
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -11,6 +21,11 @@ app = FastAPI(
     description="AI辅助小说创作的后端服务",
     version="1.0.0",
 )
+
+# 注册全局异常处理器
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 # CORS配置
 app.add_middleware(

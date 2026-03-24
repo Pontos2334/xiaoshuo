@@ -1,6 +1,13 @@
-import json
-from typing import List, Dict, Any, Optional
+import logging
+from typing import List, Dict, Any
 from app.agent.client import ClaudeAgentClient
+from app.core.json_utils import JSONParser
+
+logger = logging.getLogger(__name__)
+
+# 常量定义
+MAX_CONTENT_LENGTH = 15000
+MAX_OUTLINE_LENGTH = 5000
 
 
 class PlotAnalyzer:
@@ -8,16 +15,20 @@ class PlotAnalyzer:
 
     def __init__(self):
         self.agent = ClaudeAgentClient()
+        self.json_parser = JSONParser()
 
     async def analyze(self, content: str, outline: str = "") -> List[Dict[str, Any]]:
         """分析小说内容，提取情节节点"""
+        truncated_outline = outline[:MAX_OUTLINE_LENGTH] if outline else "暂无大纲"
+        truncated_content = content[:MAX_CONTENT_LENGTH]
+
         prompt = f"""请分析以下小说内容和大纲，提取主要情节节点。
 
 小说大纲：
-{outline[:5000] if outline else "暂无大纲"}
+{truncated_outline}
 
 小说内容：
-{content[:15000]}
+{truncated_content}
 
 请以JSON格式返回情节节点列表，每个节点包含以下字段：
 - title: 情节标题
@@ -28,44 +39,17 @@ class PlotAnalyzer:
 - importance: 重要程度（1-10）
 - content_ref: 原文关键引用（50字以内）
 
-返回格式：
-```json
-[
-  {{
-    "title": "初入江湖",
-    "chapter": "第一章",
-    "summary": "...",
-    "characters": ["张三", "李四"],
-    "emotion": "紧张",
-    "importance": 8,
-    "content_ref": "..."
-  }}
-]
-```
-
 只返回JSON数组，不要其他内容。"""
 
         response = await self.agent.generate(prompt)
 
-        try:
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = response.strip()
+        plot_nodes = self.json_parser.safe_parse_json(response, default=[])
+        if not plot_nodes:
+            logger.warning(f"情节分析返回空结果，原始响应: {response[:200]}...")
+        return plot_nodes
 
-            plot_nodes = json.loads(json_str)
-            return plot_nodes
-        except json.JSONDecodeError:
-            return []
-
-    async def analyze_connections(
-        self,
-        plot_nodes: List[Any]
-    ) -> List[Dict[str, Any]]:
+    async def analyze_connections(self, plot_nodes: List[Any]) -> List[Dict[str, Any]]:
         """分析情节之间的连接关系"""
-        # 构建情节信息字符串
         plot_info = "\n".join([
             f"- [{n.id}] {n.title}（第{n.chapter}章）：{n.summary[:100]}..."
             for n in plot_nodes
@@ -82,31 +66,11 @@ class PlotAnalyzer:
 - connection_type: 连接类型（cause因果/parallel并行/foreshadow伏笔/flashback闪回/next后续）
 - description: 连接描述
 
-返回格式：
-```json
-[
-  {{
-    "source_id": "情节ID",
-    "target_id": "情节ID",
-    "connection_type": "cause",
-    "description": "..."
-  }}
-]
-```
-
 只返回JSON数组，不要其他内容。"""
 
         response = await self.agent.generate(prompt)
 
-        try:
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = response.strip()
-
-            connections = json.loads(json_str)
-            return connections
-        except json.JSONDecodeError:
-            return []
+        connections = self.json_parser.safe_parse_json(response, default=[])
+        if not connections:
+            logger.warning(f"连接分析返回空结果，原始响应: {response[:200]}...")
+        return connections

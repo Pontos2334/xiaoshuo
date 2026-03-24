@@ -1,6 +1,13 @@
-import json
-from typing import List, Dict, Any, Optional
+import logging
+from typing import List, Dict, Any
 from app.agent.client import ClaudeAgentClient
+from app.core.json_utils import JSONParser
+
+logger = logging.getLogger(__name__)
+
+# 常量定义（替代魔法数字）
+MAX_CONTENT_LENGTH = 10000
+MAX_RELATION_CONTENT_LENGTH = 8000
 
 
 class CharacterAnalyzer:
@@ -8,13 +15,15 @@ class CharacterAnalyzer:
 
     def __init__(self):
         self.agent = ClaudeAgentClient()
+        self.json_parser = JSONParser()
 
     async def analyze(self, content: str) -> List[Dict[str, Any]]:
         """分析小说内容，提取人物信息"""
+        truncated_content = content[:MAX_CONTENT_LENGTH]
         prompt = f"""请分析以下小说内容，提取所有重要人物的信息。
 
 小说内容：
-{content[:10000]}  # 限制长度
+{truncated_content}
 
 请以JSON格式返回人物列表，每个人物包含以下字段：
 - name: 姓名
@@ -25,57 +34,27 @@ class CharacterAnalyzer:
 - story_summary: 角色故事简介
 - first_appear: 首次出现的章节（如果有）
 
-返回格式：
-```json
-[
-  {{
-    "name": "张三",
-    "aliases": ["小张", "张老三"],
-    "basic_info": {{"年龄": 25, "性别": "男", "身份": "剑客"}},
-    "personality": ["勇敢", "正直"],
-    "abilities": ["剑法", "轻功"],
-    "story_summary": "...",
-    "first_appear": "第一章"
-  }}
-]
-```
-
 只返回JSON数组，不要其他内容。"""
 
         response = await self.agent.generate(prompt)
 
-        try:
-            # 尝试解析JSON
-            # 如果响应包含markdown代码块，提取其中的JSON
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = response.strip()
+        characters = self.json_parser.safe_parse_json(response, default=[])
+        if not characters:
+            logger.warning(f"人物分析返回空结果，原始响应: {response[:200]}...")
+        return characters
 
-            characters = json.loads(json_str)
-            return characters
-        except json.JSONDecodeError:
-            # 如果解析失败，返回空列表
-            return []
-
-    async def analyze_relations(
-        self,
-        content: str,
-        characters: List[Any]
-    ) -> List[Dict[str, Any]]:
+    async def analyze_relations(self, content: str, characters: List[Any]) -> List[Dict[str, Any]]:
         """分析人物关系"""
-        # 构建人物信息字符串
         char_info = "\n".join([
             f"- {c.name}（ID: {c.id}）：{getattr(c, 'story_summary', '暂无简介')}"
             for c in characters
         ])
 
+        truncated_content = content[:MAX_RELATION_CONTENT_LENGTH]
         prompt = f"""请分析以下小说内容和人物列表，提取人物之间的关系。
 
 小说内容：
-{content[:8000]}
+{truncated_content}
 
 人物列表：
 {char_info}
@@ -83,36 +62,15 @@ class CharacterAnalyzer:
 请以JSON格式返回关系列表，每个关系包含以下字段：
 - source_id: 源人物ID
 - target_id: 目标人物ID
-- relation_type: 关系类型（如：师徒、朋友、敌人、恋人、亲人等）
+- relation_type: 关系类型
 - description: 关系描述
 - strength: 关系强度（1-10）
-
-返回格式：
-```json
-[
-  {{
-    "source_id": "人物ID",
-    "target_id": "人物ID",
-    "relation_type": "师徒",
-    "description": "...",
-    "strength": 8
-  }}
-]
-```
 
 只返回JSON数组，不要其他内容。"""
 
         response = await self.agent.generate(prompt)
 
-        try:
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = response.strip()
-
-            relations = json.loads(json_str)
-            return relations
-        except json.JSONDecodeError:
-            return []
+        relations = self.json_parser.safe_parse_json(response, default=[])
+        if not relations:
+            logger.warning(f"关系分析返回空结果，原始响应: {response[:200]}...")
+        return relations

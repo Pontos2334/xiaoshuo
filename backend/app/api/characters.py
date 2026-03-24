@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from typing import List
+import logging
 
 from app.models.database import get_db
 from app.models.models import Character, CharacterRelation, Novel
@@ -14,8 +15,10 @@ from app.models.schemas import (
     ApiResponse
 )
 from app.services.character_analyzer import CharacterAnalyzer
+from app.core.file_utils import safe_read_file
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ========== 人物 API ==========
@@ -46,8 +49,7 @@ async def analyze_characters(novel_id: str, db: Session = Depends(get_db)):
     # 获取小说内容
     content = ""
     if novel.content_path:
-        with open(novel.content_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = safe_read_file(novel.content_path)
 
     # 使用AI分析
     analyzer = CharacterAnalyzer()
@@ -140,8 +142,7 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
     # 获取小说内容
     content = ""
     if novel.content_path:
-        with open(novel.content_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = safe_read_file(novel.content_path)
 
     # 使用AI分析关系
     analyzer = CharacterAnalyzer()

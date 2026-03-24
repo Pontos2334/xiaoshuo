@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios, { AxiosError, AxiosResponse } from 'axios';
+import { toast } from 'sonner';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002/api';
 
@@ -7,7 +8,56 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 60000, // 60秒超时（AI分析可能需要较长时间）
 });
+
+// 请求拦截器
+api.interceptors.request.use(
+  (config) => {
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// 响应拦截器 - 统一错误处理
+api.interceptors.response.use(
+  (response: AxiosResponse) => {
+    // 检查业务层面的错误
+    if (response.data?.success === false) {
+      const errorMsg = response.data.error || '操作失败';
+      toast.error(errorMsg);
+      return Promise.reject(new Error(errorMsg));
+    }
+    return response;
+  },
+  (error: AxiosError<{ error?: string; detail?: string }>) => {
+    let message = '网络请求失败';
+
+    if (error.response) {
+      const status = error.response.status;
+      const data = error.response.data;
+
+      if (status === 404) {
+        message = data?.detail || data?.error || '资源不存在';
+      } else if (status === 400) {
+        message = data?.detail || data?.error || '请求参数错误';
+      } else if (status === 500) {
+        message = '服务器内部错误，请稍后重试';
+      } else {
+        message = data?.detail || data?.error || `请求失败 (${status})`;
+      }
+    } else if (error.request) {
+      message = '无法连接到服务器，请检查网络';
+    } else if (error.code === 'ECONNABORTED') {
+      message = '请求超时，请稍后重试';
+    }
+
+    toast.error(message);
+    return Promise.reject(error);
+  }
+);
 
 // 文件相关API
 export const fileApi = {

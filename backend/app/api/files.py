@@ -5,14 +5,15 @@ import os
 from typing import List
 from pydantic import BaseModel
 import uuid
-import tempfile
-import shutil
+import logging
 
 from app.models.database import get_db
 from app.models.models import Novel
 from app.models.schemas import NovelResponse, NovelCreate, ApiResponse
+from app.core.file_utils import safe_read_file, safe_write_file
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class FileContent(BaseModel):
@@ -41,14 +42,12 @@ async def get_novel_content(novel_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="小说不存在")
 
     content = ""
-    if novel.content_path and os.path.exists(novel.content_path):
-        with open(novel.content_path, "r", encoding="utf-8") as f:
-            content = f.read()
+    if novel.content_path:
+        content = safe_read_file(novel.content_path)
 
     outline = ""
-    if novel.outline_path and os.path.exists(novel.outline_path):
-        with open(novel.outline_path, "r", encoding="utf-8") as f:
-            outline = f.read()
+    if novel.outline_path:
+        outline = safe_read_file(novel.outline_path)
 
     return ApiResponse(
         success=True,
@@ -87,11 +86,14 @@ async def scan_folder(path: str, db: Session = Depends(get_db)):
                     continue
 
                 # 创建新小说记录
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
+                try:
+                    content = safe_read_file(file_path)
                     word_count = len(content)
                     # 简单估算章节数
                     chapter_count = content.count("第") if "第" in content else 1
+                except IOError as e:
+                    logger.warning(f"跳过无法读取的文件: {file_path}, 错误: {e}")
+                    continue
 
                 new_novel = Novel(
                     name=file_name,
@@ -134,8 +136,11 @@ async def upload_folder(request: FolderUploadRequest, db: Session = Depends(get_
 
     # 保存合并后的文件
     novel_path = os.path.join(data_dir, f"{request.folderName}.txt")
-    with open(novel_path, "w", encoding="utf-8") as f:
-        f.write(all_content.strip())
+    try:
+        safe_write_file(novel_path, all_content.strip())
+    except IOError as e:
+        logger.error(f"保存小说失败: {e}")
+        return ApiResponse(success=False, error=f"保存小说失败: {e}")
 
     # 检查是否已存在
     existing = db.query(Novel).filter(Novel.path == novel_path).first()

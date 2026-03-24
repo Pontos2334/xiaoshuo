@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
 import { PlotGraph } from '@/components/PlotGraph/PlotGraph';
@@ -21,7 +22,7 @@ export default function Home() {
   // AI分析人物
   const handleAnalyzeCharacters = async () => {
     if (!currentNovel) {
-      alert('请先打开文件夹选择小说');
+      toast.error('请先打开文件夹选择小说');
       return;
     }
 
@@ -54,17 +55,16 @@ export default function Home() {
         const relData = await relResponse.json();
         if (relData.success) {
           setRelations(relData.data || []);
-          setStatusMessage(`完成！${data.data?.length || 0} 个人物，${relData.data?.length || 0} 个关系`);
+          toast.success(`完成！${data.data?.length || 0} 个人物，${relData.data?.length || 0} 个关系`);
         }
       } else {
-        setStatusMessage(`分析失败: ${data.error || '未知错误'}`);
+        toast.error(`分析失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
       console.error('分析人物失败:', error);
-      setStatusMessage(`分析失败: ${(error as Error).message}`);
+      toast.error(`分析失败: ${(error as Error).message}`);
     } finally {
       setIsAnalyzing(false);
-      // 3秒后清除状态消息
       setTimeout(() => setStatusMessage(''), 3000);
     }
   };
@@ -72,7 +72,7 @@ export default function Home() {
   // AI分析情节
   const handleAnalyzePlots = async () => {
     if (!currentNovel) {
-      alert('请先打开文件夹选择小说');
+      toast.error('请先打开文件夹选择小说');
       return;
     }
 
@@ -105,14 +105,14 @@ export default function Home() {
         const connData = await connResponse.json();
         if (connData.success) {
           setPlotConnections(connData.data || []);
-          setStatusMessage(`完成！${data.data?.length || 0} 个情节，${connData.data?.length || 0} 个关联`);
+          toast.success(`完成！${data.data?.length || 0} 个情节，${connData.data?.length || 0} 个关联`);
         }
       } else {
-        setStatusMessage(`分析失败: ${data.error || '未知错误'}`);
+        toast.error(`分析失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
       console.error('分析情节失败:', error);
-      setStatusMessage(`分析失败: ${(error as Error).message}`);
+      toast.error(`分析失败: ${(error as Error).message}`);
     } finally {
       setIsAnalyzing(false);
       setTimeout(() => setStatusMessage(''), 3000);
@@ -143,13 +143,13 @@ export default function Home() {
           content: data.data.content || data.data,
           createdAt: new Date().toISOString(),
         });
-        setStatusMessage('灵感生成成功！');
+        toast.success('灵感生成成功！');
       } else {
-        setStatusMessage(`生成失败: ${data.error || '未知错误'}`);
+        toast.error(`生成失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
       console.error('生成灵感失败:', error);
-      setStatusMessage(`生成失败: ${(error as Error).message}`);
+      toast.error(`生成失败: ${(error as Error).message}`);
     } finally {
       setIsAnalyzing(false);
       setTimeout(() => setStatusMessage(''), 3000);

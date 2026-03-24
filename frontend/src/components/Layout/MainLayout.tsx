@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode, useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -91,7 +92,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       }
 
       if (files.length === 0) {
-        alert('该文件夹中没有找到小说文件（TXT/MD）');
+        toast.warning('该文件夹中没有找到小说文件（TXT/MD）');
         setIsLoading(false);
         return;
       }
@@ -116,7 +117,7 @@ export function MainLayout({ children }: MainLayoutProps) {
         // 保存文件夹名称
         localStorage.setItem(LAST_PATH_KEY, folderName);
       } else {
-        alert(data.error || '处理文件夹失败');
+        toast.error(data.error || '处理文件夹失败');
       }
     } catch (error) {
       // 用户取消选择
@@ -124,7 +125,7 @@ export function MainLayout({ children }: MainLayoutProps) {
         return;
       }
       console.error('选择文件夹失败:', error);
-      alert('选择文件夹失败，请重试');
+      toast.error('选择文件夹失败，请重试');
     } finally {
       setIsLoading(false);
     }
@@ -147,11 +148,11 @@ export function MainLayout({ children }: MainLayoutProps) {
         setFolderDialogOpen(false);
         localStorage.setItem(LAST_PATH_KEY, path);
       } else {
-        alert(data.error || '扫描文件夹失败');
+        toast.error(data.error || '扫描文件夹失败');
       }
     } catch (error) {
       console.error('扫描文件夹失败:', error);
-      alert('扫描文件夹失败，请确保后端服务正在运行');
+      toast.error('扫描文件夹失败，请确保后端服务正在运行');
     } finally {
       setIsLoading(false);
     }
