@@ -121,12 +121,15 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
       data: char,
     }));
 
-    const edges = relations.map(rel => ({
-      id: rel.id,
-      source: rel.sourceId,
-      target: rel.targetId,
-      data: rel,
-    }));
+    // 过滤掉无效的边（sourceId 或 targetId 为空）
+    const edges = relations
+      .filter(rel => rel.sourceId && rel.targetId)
+      .map(rel => ({
+        id: rel.id,
+        source: rel.sourceId,
+        target: rel.targetId,
+        data: rel,
+      }));
 
     try {
       graph.setData({

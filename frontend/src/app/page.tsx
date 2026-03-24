@@ -125,8 +125,11 @@ export default function Home() {
     setStatusMessage('正在生成灵感...');
     try {
       const endpoint = `${API_URL}/inspiration/${type}`;
-      const body: Record<string, string | undefined> = {};
-      if (targetId) body.targetId = targetId;
+      const body: Record<string, string | undefined> = {
+        type, // 添加 type 字段
+      };
+      if (currentNovel?.id) body.novel_id = currentNovel.id;
+      if (targetId) body.target_id = targetId;
       if (context) body.context = context;
 
       const response = await fetch(endpoint, {
