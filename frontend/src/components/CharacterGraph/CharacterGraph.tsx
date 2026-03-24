@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useCharacterStore } from '@/stores';
-import { Character } from '@/types';
+import { Character, CharacterRelation } from '@/types';
 import { RefreshCw, Edit2, Trash2, Loader2 } from 'lucide-react';
 
 interface CharacterGraphProps {
@@ -29,6 +29,12 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
   const [graphReady, setGraphReady] = useState(false);
+
+  // 用于在点击事件中获取最新的 characters
+  const charactersRef = useRef(characters);
+  useEffect(() => {
+    charactersRef.current = characters;
+  }, [characters]);
 
   // 初始化图谱
   useEffect(() => {
@@ -50,7 +56,12 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
       behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
       node: {
         style: {
-          size: 60,
+          size: (d: Record<string, unknown>) => {
+            // 根据关系数量调整节点大小
+            const data = d.data as Character;
+            const relCount = relations.filter(r => r.sourceId === data?.id || r.targetId === data?.id).length;
+            return Math.max(50, 50 + relCount * 5);
+          },
           fill: '#5B8FF9',
           stroke: '#1890ff',
           lineWidth: 2,
@@ -80,18 +91,20 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
       layout: {
         type: 'force',
         preventOverlap: true,
-        nodeStrength: -300,
-        edgeStrength: 0.1,
+        nodeStrength: -500,
+        edgeStrength: 0.2,
+        linkDistance: 150,
+        nodeSpacing: 100,
       },
     });
 
     graphRef.current = graph;
 
-    // 节点点击事件
+    // 节点点击事件 - 使用 ref 获取最新的 characters
     graph.on('node:click', (event: unknown) => {
       const evt = event as { target: { id: string } };
       const nodeId = evt.target.id;
-      const character = characters.find(c => c.id === nodeId);
+      const character = charactersRef.current.find(c => c.id === nodeId);
       if (character) {
         setSelectedCharacter(character);
       }
@@ -110,6 +123,17 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 辅助函数：通过名称或ID找到人物ID
+  const findCharacterId = (ref: string): string | null => {
+    const char = characters.find(c =>
+      c.id === ref ||
+      c.name === ref ||
+      c.name?.includes(ref.replace('ID', '').replace('人物', '')) ||
+      ref.includes(c.name || '')
+    );
+    return char?.id || null;
+  };
+
   // 更新图谱数据
   useEffect(() => {
     if (!graphReady || !isGraphReady(graphRef.current)) return;
@@ -121,20 +145,46 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
       data: char,
     }));
 
-    // 过滤掉无效的边（sourceId 或 targetId 为空）
-    const edges = relations
-      .filter(rel => rel.sourceId && rel.targetId)
-      .map(rel => ({
-        id: rel.id,
-        source: rel.sourceId,
-        target: rel.targetId,
-        data: rel,
-      }));
+    // 处理关系数据，通过名称匹配ID
+    const validEdges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      data: CharacterRelation;
+    }> = [];
+
+    relations.forEach(rel => {
+      let sourceId = rel.sourceId;
+      let targetId = rel.targetId;
+
+      // 如果 sourceId/targetId 不是有效的人物ID，尝试通过名称匹配
+      if (!characters.find(c => c.id === sourceId)) {
+        const matched = findCharacterId(sourceId);
+        if (matched) sourceId = matched;
+      }
+      if (!characters.find(c => c.id === targetId)) {
+        const matched = findCharacterId(targetId);
+        if (matched) targetId = matched;
+      }
+
+      // 只有当 sourceId 和 targetId 都是有效的人物ID 时才添加边
+      if (sourceId && targetId &&
+          characters.find(c => c.id === sourceId) &&
+          characters.find(c => c.id === targetId) &&
+          sourceId !== targetId) {
+        validEdges.push({
+          id: rel.id,
+          source: sourceId,
+          target: targetId,
+          data: rel,
+        });
+      }
+    });
 
     try {
       graph.setData({
         nodes,
-        edges,
+        edges: validEdges,
       });
       graph.render();
     } catch (error) {
@@ -202,7 +252,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
               <div>
                 <h4 className="text-sm font-medium mb-1">基本信息</h4>
                 <div className="space-y-1">
-                  {Object.entries(selectedCharacter.basicInfo || {}).map(([key, value]) => (
+                  {Object.entries(selectedCharacter.basicInfo || selectedCharacter.basic_info || {}).map(([key, value]) => (
                     <div key={key} className="flex justify-between text-sm">
                       <span className="text-muted-foreground">{key}</span>
                       <span>{String(value)}</span>
@@ -231,7 +281,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
 
               <div>
                 <h4 className="text-sm font-medium mb-1">故事简介</h4>
-                <p className="text-sm text-muted-foreground">{selectedCharacter.storySummary || '暂无'}</p>
+                <p className="text-sm text-muted-foreground">{selectedCharacter.storySummary || selectedCharacter.story_summary || '暂无'}</p>
               </div>
 
               <div className="flex gap-2 pt-4">

@@ -139,6 +139,9 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
     if not characters:
         raise HTTPException(status_code=400, detail="请先分析人物")
 
+    # 创建名称到ID的映射
+    name_to_id = {c.name: c.id for c in characters}
+
     # 获取小说内容
     content = ""
     if novel.content_path:
@@ -148,25 +151,61 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
     analyzer = CharacterAnalyzer()
     relations = await analyzer.analyze_relations(content, characters)
 
+    # 辅助函数：通过名称或ID找到真正的人物ID
+    def find_character_id(ref: str) -> str | None:
+        if not ref:
+            return None
+        # 直接匹配ID
+        if ref in name_to_id.values():
+            return ref
+        # 通过名称匹配
+        if ref in name_to_id:
+            return name_to_id[ref]
+        # 模糊匹配（处理 "李云ID" 这种情况）
+        for name, char_id in name_to_id.items():
+            if name in ref or ref.replace('ID', '').replace('人物', '').strip() in name:
+                return char_id
+        return None
+
     # 保存到数据库
+    saved_count = 0
     for rel_data in relations:
+        source_ref = rel_data.get("source_id", "")
+        target_ref = rel_data.get("target_id", "")
+
+        # 转换为真正的人物ID
+        source_id = find_character_id(source_ref)
+        target_id = find_character_id(target_ref)
+
+        if not source_id or not target_id:
+            logger.warning(f"跳过无效关系: {source_ref} -> {target_ref}")
+            continue
+
+        # 检查是否已存在
         existing = db.query(CharacterRelation).filter(
             CharacterRelation.novel_id == novel_id,
-            CharacterRelation.source_id == rel_data.get("source_id"),
-            CharacterRelation.target_id == rel_data.get("target_id")
+            CharacterRelation.source_id == source_id,
+            CharacterRelation.target_id == target_id
         ).first()
 
         if existing:
             for key, value in rel_data.items():
-                setattr(existing, key, value)
+                if key not in ["source_id", "target_id"]:
+                    setattr(existing, key, value)
         else:
             new_rel = CharacterRelation(
                 novel_id=novel_id,
-                **rel_data
+                source_id=source_id,
+                target_id=target_id,
+                relation_type=rel_data.get("relation_type", ""),
+                description=rel_data.get("description", ""),
+                strength=rel_data.get("strength", 5),
             )
             db.add(new_rel)
+            saved_count += 1
 
     db.commit()
+    logger.info(f"保存了 {saved_count} 个新关系")
 
     # 返回所有关系
     all_relations = db.query(CharacterRelation).filter(
