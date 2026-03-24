@@ -151,7 +151,8 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
     plotNodesRef.current = plotNodes;
   }, [plotNodes]);
 
-  // 转换为React Flow格式，  const initialNodes: Node[] = useMemo(() => {
+  // 转换为React Flow格式
+  const initialNodes: Node[] = useMemo(() => {
     if (plotNodes.length === 0) return [];
 
     // 按章节排序
