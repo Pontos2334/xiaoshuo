@@ -140,29 +140,67 @@ async def analyze_connections(novel_id: str, db: Session = Depends(get_db)):
     if not plot_nodes:
         raise HTTPException(status_code=400, detail="请先分析情节节点")
 
+    # 创建标题到ID的映射
+    title_to_id = {node.title: node.id for node in plot_nodes}
+
+    # 辅助函数：通过标题或ID找到真正的情节ID
+    def find_plot_id(ref: str) -> str | None:
+        if not ref:
+            return None
+        # 直接匹配ID
+        if ref in title_to_id.values():
+            return ref
+        # 通过标题匹配
+        if ref in title_to_id:
+            return title_to_id[ref]
+        # 模糊匹配（处理 "情节1ID" 或包含标题的情况）
+        for title, node_id in title_to_id.items():
+            if title in ref or ref.replace('ID', '').replace('情节', '').strip() in title:
+                return node_id
+        return None
+
     # 使用AI分析连接
     analyzer = PlotAnalyzer()
     connections = await analyzer.analyze_connections(plot_nodes)
 
     # 保存到数据库
+    saved_count = 0
     for conn_data in connections:
+        source_ref = conn_data.get("source_id", "")
+        target_ref = conn_data.get("target_id", "")
+
+        # 转换为真正的情节ID
+        source_id = find_plot_id(source_ref)
+        target_id = find_plot_id(target_ref)
+
+        if not source_id or not target_id:
+            logger.warning(f"跳过无效连接: {source_ref} -> {target_ref}")
+            continue
+
+        # 检查是否已存在
         existing = db.query(PlotConnection).filter(
             PlotConnection.novel_id == novel_id,
-            PlotConnection.source_id == conn_data.get("source_id"),
-            PlotConnection.target_id == conn_data.get("target_id")
+            PlotConnection.source_id == source_id,
+            PlotConnection.target_id == target_id
         ).first()
 
         if existing:
             for key, value in conn_data.items():
-                setattr(existing, key, value)
+                if key not in ["source_id", "target_id"]:
+                    setattr(existing, key, value)
         else:
             new_conn = PlotConnection(
                 novel_id=novel_id,
-                **conn_data
+                source_id=source_id,
+                target_id=target_id,
+                connection_type=conn_data.get("connection_type", "next"),
+                description=conn_data.get("description", ""),
             )
             db.add(new_conn)
+            saved_count += 1
 
     db.commit()
+    logger.info(f"保存了 {saved_count} 个新情节连接")
 
     # 返回所有连接
     all_connections = db.query(PlotConnection).filter(
