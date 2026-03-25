@@ -20,15 +20,24 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { usePlotStore } from '@/stores';
 import { PlotNode as PlotNodeType, PlotConnection } from '@/types';
-import { RefreshCw, Edit2, Trash2, Loader2, Plus, X } from 'lucide-react';
+import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown } from 'lucide-react';
 import { PlotNodeComponent } from './PlotNode';
 import { getLayoutedElements, extractChapterNumber } from '@/lib/layoutUtils';
+import { AnalyzeMode } from '@/app/page';
 
 interface PlotGraphProps {
-  onAnalyze?: () => void;
+  onAnalyze?: (mode?: AnalyzeMode) => void;
   isAnalyzing?: boolean;
+  analyzeMode?: AnalyzeMode;
+  setAnalyzeMode?: (mode: AnalyzeMode) => void;
 }
 
 const nodeTypes = {
@@ -50,7 +59,7 @@ function findPlotId(ref: string, nodes: PlotNodeType[]): string | null {
   return null;
 }
 
-export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
+export function PlotGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental', setAnalyzeMode }: PlotGraphProps) {
   const { plotNodes, plotConnections, selectedPlotNode, setSelectedPlotNode, updatePlotNode, deletePlotNode } = usePlotStore();
   const plotNodesRef = useRef(plotNodes);
 
@@ -217,14 +226,41 @@ export function PlotGraph({ onAnalyze, isAnalyzing }: PlotGraphProps) {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>情节关联图</CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onAnalyze} disabled={isAnalyzing}>
-              {isAnalyzing ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-1" />
-              )}
-              {isAnalyzing ? '分析中...' : 'AI分析'}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={isAnalyzing}>
+                  {isAnalyzing ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                  )}
+                  {isAnalyzing ? '分析中...' : 'AI分析'}
+                  <ChevronDown className="h-4 w-4 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => {
+                    setAnalyzeMode?.('incremental');
+                    onAnalyze?.('incremental');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <span className={analyzeMode === 'incremental' ? 'font-bold' : ''}>增量分析</span>
+                  <span className="text-xs text-muted-foreground ml-auto">推荐</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setAnalyzeMode?.('full');
+                    onAnalyze?.('full');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <span className={analyzeMode === 'full' ? 'font-bold' : ''}>全量分析</span>
+                  <span className="text-xs text-muted-foreground ml-auto">重新分析全部</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </CardHeader>
         <CardContent className="p-0">

@@ -70,11 +70,12 @@ export const fileApi = {
 export const characterApi = {
   getCharacters: (novelId: string) => api.get(`/characters?novelId=${novelId}`),
   getCharacter: (id: string) => api.get(`/characters/${id}`),
-  analyzeCharacters: (novelId: string) => api.post('/characters/analyze', { novelId }),
+  analyzeCharacters: (novelId: string, mode: 'full' | 'incremental' = 'full') =>
+    api.post(`/characters/analyze?novelId=${novelId}&mode=${mode}`),
   updateCharacter: (id: string, data: Record<string, unknown>) => api.put(`/characters/${id}`, data),
   deleteCharacter: (id: string) => api.delete(`/characters/${id}`),
   getRelations: (novelId: string) => api.get(`/characters/relations?novelId=${novelId}`),
-  analyzeRelations: (novelId: string) => api.post('/relations/analyze', { novelId }),
+  analyzeRelations: (novelId: string) => api.post(`/relations/analyze?novelId=${novelId}`),
   updateRelation: (id: string, data: Record<string, unknown>) => api.put(`/relations/${id}`, data),
 };
 
@@ -82,11 +83,12 @@ export const characterApi = {
 export const plotApi = {
   getPlotNodes: (novelId: string) => api.get(`/plots?novelId=${novelId}`),
   getPlotNode: (id: string) => api.get(`/plots/${id}`),
-  analyzePlots: (novelId: string) => api.post('/plots/analyze', { novelId }),
+  analyzePlots: (novelId: string, mode: 'full' | 'incremental' = 'full') =>
+    api.post(`/plots/analyze?novelId=${novelId}&mode=${mode}`),
   updatePlotNode: (id: string, data: Record<string, unknown>) => api.put(`/plots/${id}`, data),
   deletePlotNode: (id: string) => api.delete(`/plots/${id}`),
   getConnections: (novelId: string) => api.get(`/plots/connections?novelId=${novelId}`),
-  analyzeConnections: (novelId: string) => api.post('/connections/analyze', { novelId }),
+  analyzeConnections: (novelId: string) => api.post(`/connections/analyze?novelId=${novelId}`),
   updateConnection: (id: string, data: Record<string, unknown>) => api.put(`/connections/${id}`, data),
 };
 

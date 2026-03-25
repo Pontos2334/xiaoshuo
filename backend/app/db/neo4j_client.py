@@ -3,6 +3,10 @@ from typing import Optional
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable
 import logging
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

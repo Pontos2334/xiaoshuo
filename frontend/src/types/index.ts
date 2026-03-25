@@ -59,6 +59,7 @@ export interface Novel {
   wordCount: number;
   createdAt: string;
   updatedAt: string;
+  [key: string]: unknown; // 添加索引签名以兼容 snake_case 字段
 }
 
 // 灵感类型

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 import logging
+import re
 
 from app.models.database import get_db
 from app.models.models import Character, CharacterRelation, Novel
@@ -15,6 +17,7 @@ from app.models.schemas import (
     ApiResponse
 )
 from app.services.character_analyzer import CharacterAnalyzer
+from app.services.chapter_splitter import chapter_splitter
 from app.core.file_utils import safe_read_file
 from app.db.repository import character_repo, character_relation_repo
 
@@ -28,16 +31,22 @@ logger = logging.getLogger(__name__)
 async def get_relations(novel_id: str, db: Session = Depends(get_db)):
     """获取人物关系列表"""
     logger.info(f"get_relations called with novel_id={novel_id}")
+
+    # 尝试从 Neo4j 获取
     try:
         relations = character_relation_repo.get_by_novel(novel_id)
         if relations:
+            logger.info(f"从 Neo4j 获取到 {len(relations)} 个关系")
             return relations
+        logger.info("Neo4j 中没有关系数据")
     except Exception as e:
         logger.warning(f"Neo4j 查询失败，回退到 SQLite: {e}")
 
+    # 从 SQLite 获取
     relations = db.query(CharacterRelation).filter(
         CharacterRelation.novel_id == novel_id
     ).all()
+    logger.info(f"从 SQLite 获取到 {len(relations)} 个关系")
     return relations
 
 
@@ -157,7 +166,20 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"保存关系失败: {str(e)}")
 
     # 返回所有关系
-    all_relations = character_relation_repo.get_by_novel(novel_id)
+    try:
+        all_relations = character_relation_repo.get_by_novel(novel_id)
+        if not all_relations:
+            # Neo4j 没有数据，从 SQLite 获取
+            all_relations = db.query(CharacterRelation).filter(
+                CharacterRelation.novel_id == novel_id
+            ).all()
+            logger.info(f"从 SQLite 获取到 {len(all_relations)} 个关系用于返回")
+    except Exception as e:
+        logger.warning(f"从 Neo4j 获取关系失败: {e}，回退到 SQLite")
+        all_relations = db.query(CharacterRelation).filter(
+            CharacterRelation.novel_id == novel_id
+        ).all()
+
     return ApiResponse(
         success=True,
         data=all_relations
@@ -232,8 +254,19 @@ async def get_characters(novel_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/analyze", response_model=ApiResponse)
-async def analyze_characters(novel_id: str, db: Session = Depends(get_db)):
-    """AI分析小说内容，生成人物信息"""
+async def analyze_characters(
+    novel_id: str,
+    mode: str = Query('full', description="分析模式: full(全量) | incremental(增量)"),
+    db: Session = Depends(get_db)
+):
+    """
+    AI分析小说内容，生成人物信息
+
+    Args:
+        mode: 分析模式
+            - 'full': 全量分析，会重新分析所有内容（默认）
+            - 'incremental': 增量分析，只分析新章节，保留用户手动修改的数据
+    """
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if not novel:
         raise HTTPException(status_code=404, detail="小说不存在")
@@ -243,43 +276,218 @@ async def analyze_characters(novel_id: str, db: Session = Depends(get_db)):
     if novel.content_path:
         content = safe_read_file(novel.content_path)
 
-    # 使用AI分析
+    if not content:
+        raise HTTPException(status_code=400, detail="小说内容为空")
+
+    # 获取当前分析版本
+    current_version = (novel.analysis_version or 0) + 1
+
     analyzer = CharacterAnalyzer()
-    characters = await analyzer.analyze(content)
+
+    # 根据模式选择分析方法
+    if mode == 'incremental' and novel.last_analyzed_chapter and novel.last_analyzed_chapter > 0:
+        # 增量分析模式
+        logger.info(f"增量分析模式: 从第 {novel.last_analyzed_chapter + 1} 章开始")
+
+        # 获取现有人物数据
+        existing_characters = db.query(Character).filter(
+            Character.novel_id == novel_id
+        ).all()
+
+        # 转换为字典列表
+        existing_chars_data = []
+        for c in existing_characters:
+            existing_chars_data.append({
+                'id': c.id,
+                'name': c.name,
+                'aliases': c.aliases or [],
+                'basic_info': c.basic_info or {},
+                'personality': c.personality or [],
+                'abilities': c.abilities or [],
+                'story_summary': c.story_summary,
+                'first_appear': c.first_appear,
+                'source': c.source or 'ai',
+                'ai_version': c.ai_version or 1,
+            })
+
+        # 增量分析
+        characters = await analyzer.analyze_incremental(
+            content,
+            existing_chars_data,
+            novel.last_analyzed_chapter + 1,  # 从下一章开始
+            current_version
+        )
+
+        # 计算新的最大章节号
+        new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+
+    else:
+        # 全量分析模式
+        logger.info("全量分析模式")
+
+        # 全量分析前，先删除该小说的所有旧人物数据
+        logger.info(f"删除小说 {novel_id} 的旧人物数据...")
+
+        # 删除 Neo4j 中的人物
+        try:
+            old_neo4j_chars = character_repo.get_by_novel(novel_id) or []
+            for old_char in old_neo4j_chars:
+                try:
+                    character_repo.delete(old_char.get('id'))
+                except Exception as e:
+                    logger.warning(f"删除 Neo4j 人物失败: {e}")
+            logger.info(f"已删除 {len(old_neo4j_chars)} 个 Neo4j 人物")
+        except Exception as e:
+            logger.warning(f"获取/删除 Neo4j 人物失败: {e}")
+
+        # 删除 SQLite 中的人物关系
+        db.query(CharacterRelation).filter(CharacterRelation.novel_id == novel_id).delete()
+
+        # 删除 SQLite 中的人物
+        deleted_sqlite = db.query(Character).filter(Character.novel_id == novel_id).delete()
+        db.commit()
+        logger.info(f"已删除 {deleted_sqlite} 个 SQLite 人物")
+
+        try:
+            raw_characters = await analyzer.analyze(content)
+            logger.info(f"AI 分析完成，返回 {len(raw_characters)} 个人物")
+        except Exception as e:
+            logger.error(f"AI 分析失败: {type(e).__name__}: {e}")
+            raise HTTPException(status_code=500, detail=f"AI 分析失败: {str(e)}")
+
+        # 对 AI 返回的人物进行去重合并
+        characters = []
+        seen_names = {}
+        try:
+            for char in raw_characters:
+                name = char.get('name', '')
+                if not name:
+                    continue
+
+                # 标准化名字（去除空格和常见后缀）
+                normalized_name = re.sub(r'\s+', '', name.strip())
+                # 去除常见后缀如（师兄）、（师傅）等
+                normalized_name = re.sub(r'[（(][^）)]*[）)]', '', normalized_name).strip()
+
+                if normalized_name in seen_names:
+                    # 合并到已存在的人物
+                    existing = seen_names[normalized_name]
+                    # 合并别名
+                    if char.get('aliases'):
+                        existing_aliases = existing.get('aliases', [])
+                        for alias in char['aliases']:
+                            if alias not in existing_aliases:
+                                existing_aliases.append(alias)
+                        existing['aliases'] = existing_aliases
+                    # 合并性格
+                    if char.get('personality'):
+                        existing_personality = existing.get('personality', [])
+                        for p in char['personality']:
+                            if p not in existing_personality:
+                                existing_personality.append(p)
+                        existing['personality'] = existing_personality
+                    # 合并能力
+                    if char.get('abilities'):
+                        existing_abilities = existing.get('abilities', [])
+                        for a in char['abilities']:
+                            if a not in existing_abilities:
+                                existing_abilities.append(a)
+                        existing['abilities'] = existing_abilities
+                else:
+                    # 新人物
+                    char['source'] = 'ai'
+                    char['ai_version'] = current_version
+                    characters.append(char)
+                    seen_names[normalized_name] = char
+
+            logger.info(f"去重合并后剩余 {len(characters)} 个人物")
+        except Exception as e:
+            logger.error(f"人物去重合并失败: {type(e).__name__}: {e}")
+            raise HTTPException(status_code=500, detail=f"人物去重合并失败: {str(e)}")
+
+        # 计算最大章节号
+        try:
+            new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+            logger.info(f"最大章节号: {new_max_chapter}")
+        except Exception as e:
+            logger.warning(f"计算章节号失败: {e}")
+            new_max_chapter = 0
 
     # Saga 模式：记录已写入的数据，用于回滚
     saved_neo4j_ids: List[str] = []
     saved_sqlite_ids: List[str] = []
 
+    logger.info(f"开始保存 {len(characters)} 个人物到数据库")
+
     try:
         # Step 1: 保存到 Neo4j
+        logger.info("Step 1: 保存到 Neo4j...")
         for char_data in characters:
             try:
-                char = character_repo.create(novel_id, char_data)
+                # 排除内部字段
+                neo4j_data = {k: v for k, v in char_data.items() if k not in ['id', 'source', 'ai_version']}
+                char = character_repo.create(novel_id, neo4j_data)
                 if char:
                     saved_neo4j_ids.append(char.get("id"))
             except Exception as e:
                 logger.error(f"保存人物到 Neo4j 失败: {e}")
 
-        # Step 2: 保存到 SQLite
-        for char_data in characters:
-            existing = db.query(Character).filter(
-                Character.novel_id == novel_id,
-                Character.name == char_data.get("name")
-            ).first()
+        logger.info(f"Neo4j 保存完成，成功 {len(saved_neo4j_ids)} 个")
 
-            if existing:
-                for key, value in char_data.items():
-                    setattr(existing, key, value)
-                saved_sqlite_ids.append(existing.id)
+        # Step 2: 保存到 SQLite
+        logger.info("Step 2: 保存到 SQLite...")
+        for char_data in characters:
+            char_id = char_data.get('id')
+            source = char_data.get('source', 'ai')
+            ai_version = char_data.get('ai_version', current_version)
+
+            if char_id:
+                # 更新现有人物
+                existing = db.query(Character).filter(Character.id == char_id).first()
+                if existing:
+                    # 只更新 AI 生成的数据，保留用户修改的
+                    if existing.source in ('user', 'ai_modified'):
+                        # 保留用户修改的字段，只更新 AI 允许更新的字段
+                        if char_data.get('aliases'):
+                            existing_aliases = existing.aliases or []
+                            for alias in char_data.get('aliases', []):
+                                if alias not in existing_aliases:
+                                    existing_aliases.append(alias)
+                            existing.aliases = existing_aliases
+                        existing.source = 'ai_modified'
+                        existing.ai_version = ai_version
+                    else:
+                        # AI 数据可以完全更新
+                        for key, value in char_data.items():
+                            if key not in ['id', 'source', 'ai_version']:
+                                setattr(existing, key, value)
+                        existing.source = source
+                        existing.ai_version = ai_version
+                    saved_sqlite_ids.append(existing.id)
             else:
+                # 新增人物
                 new_char = Character(
                     novel_id=novel_id,
-                    **char_data
+                    name=char_data.get('name', ''),
+                    aliases=char_data.get('aliases', []),
+                    basic_info=char_data.get('basic_info', {}),
+                    personality=char_data.get('personality', []),
+                    abilities=char_data.get('abilities', []),
+                    story_summary=char_data.get('story_summary'),
+                    first_appear=char_data.get('first_appear'),
+                    source=source,
+                    ai_version=ai_version,
                 )
                 db.add(new_char)
-                db.flush()  # 获取 ID 但不提交
+                db.flush()
                 saved_sqlite_ids.append(new_char.id)
+
+        logger.info(f"SQLite 保存完成，成功 {len(saved_sqlite_ids)} 个")
+
+        # 更新小说的分析进度
+        novel.last_analyzed_chapter = new_max_chapter
+        novel.last_analyzed_at = datetime.utcnow()
+        novel.analysis_version = current_version
 
         # 两边都成功，提交事务
         db.commit()
@@ -301,13 +509,51 @@ async def analyze_characters(novel_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"保存人物失败: {str(e)}")
 
     # 返回所有人物
-    all_characters = character_repo.get_by_novel(novel_id) or []
+    logger.info("获取所有人物用于返回...")
+    try:
+        all_characters = character_repo.get_by_novel(novel_id) or []
+        logger.info(f"从 Neo4j 获取到 {len(all_characters)} 个人物")
+    except Exception as e:
+        logger.warning(f"从 Neo4j 获取人物失败: {e}")
+        all_characters = []
+
     if not all_characters:
-        all_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
+        try:
+            all_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
+            logger.info(f"从 SQLite 获取到 {len(all_characters)} 个人物")
+            # 转换为可序列化的字典
+            all_characters = [
+                {
+                    'id': c.id,
+                    'name': c.name,
+                    'aliases': c.aliases or [],
+                    'basic_info': c.basic_info or {},
+                    'personality': c.personality or [],
+                    'abilities': c.abilities or [],
+                    'story_summary': c.story_summary,
+                    'first_appear': c.first_appear,
+                    'novel_id': c.novel_id,
+                    'source': c.source,
+                    'ai_version': c.ai_version,
+                    'created_at': c.created_at.isoformat() if c.created_at else None,
+                    'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+                }
+                for c in all_characters
+            ]
+        except Exception as e:
+            logger.error(f"从 SQLite 获取人物失败: {e}")
+            all_characters = []
+
+    logger.info(f"准备返回响应: {len(all_characters)} 个人物")
 
     return ApiResponse(
         success=True,
-        data=all_characters
+        data={
+            'characters': all_characters,
+            'mode': mode,
+            'analyzed_chapter': new_max_chapter,
+            'version': current_version,
+        }
     )
 
 
@@ -333,8 +579,11 @@ async def update_character(
     data: CharacterUpdate,
     db: Session = Depends(get_db)
 ):
-    """更新人物信息"""
+    """更新人物信息（用户手动编辑会标记为 ai_modified）"""
     update_data = data.model_dump(exclude_unset=True)
+
+    # 标记为用户修改
+    update_data['source'] = 'ai_modified'
 
     # 更新 Neo4j
     try:

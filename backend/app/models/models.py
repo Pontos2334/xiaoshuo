@@ -23,6 +23,11 @@ class Novel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # 分析进度
+    last_analyzed_chapter = Column(Integer, default=0)  # 已分析到第几章
+    last_analyzed_at = Column(DateTime)  # 上次分析时间
+    analysis_version = Column(Integer, default=0)  # 分析版本号
+
     # 关系
     characters = relationship("Character", back_populates="novel", cascade="all, delete-orphan")
     plot_nodes = relationship("PlotNode", back_populates="novel", cascade="all, delete-orphan")
@@ -41,6 +46,11 @@ class Character(Base):
     abilities = Column(JSON, default=list)  # 能力
     story_summary = Column(Text)  # 故事简介
     first_appear = Column(String)  # 首次出现章节
+
+    # 数据来源追踪
+    source = Column(String, default='ai')  # 'ai' | 'user' | 'ai_modified'
+    ai_version = Column(Integer, default=1)  # AI分析版本号
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -98,6 +108,11 @@ class PlotNode(Base):
     emotion = Column(String)  # 主要情绪
     importance = Column(Integer, default=5)  # 重要程度 1-10
     content_ref = Column(Text)  # 原文引用
+
+    # 数据来源追踪
+    source = Column(String, default='ai')  # 'ai' | 'user' | 'ai_modified'
+    ai_version = Column(Integer, default=1)  # AI分析版本号
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

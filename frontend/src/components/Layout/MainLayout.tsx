@@ -18,6 +18,8 @@ import {
   Menu,
   X,
   Loader2,
+  Trash2,
+  Download,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002/api';
@@ -134,12 +136,17 @@ export function MainLayout({ children }: MainLayoutProps) {
       const data = await response.json();
 
       if (data.success && data.data) {
-        setNovels(data.data);
+        // 追加新小说到列表，而不是替换
+        const newNovels = data.data.filter(
+          (newNovel: Novel) => !novels.some((n) => n.id === newNovel.id)
+        );
+        setNovels([...novels, ...newNovels]);
         if (data.data.length > 0) {
           setCurrentNovel(data.data[0]);
         }
         // 保存文件夹名称
         localStorage.setItem(LAST_PATH_KEY, folderName);
+        toast.success(`已添加 ${newNovels.length} 部小说`);
       } else {
         toast.error(data.error || '处理文件夹失败');
       }
@@ -186,6 +193,76 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   const handleOpenFolder = () => {
     handleSelectFolder();
+  };
+
+  // 删除小说
+  const handleDeleteNovel = async (novel: Novel, e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止触发选择
+
+    if (!confirm(`确定要删除《${novel.name}》吗？\n\n这将同时删除该小说的所有人物、情节和灵感数据。`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/files/novels/${novel.id}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // 从列表中移除
+        const updatedNovels = novels.filter((n) => n.id !== novel.id);
+        setNovels(updatedNovels);
+
+        // 如果删除的是当前选中的小说，切换到其他小说
+        if (currentNovel?.id === novel.id) {
+          if (updatedNovels.length > 0) {
+            setCurrentNovel(updatedNovels[0]);
+          } else {
+            setCurrentNovel(null);
+          }
+        }
+
+        toast.success(data.data?.message || '删除成功');
+      } else {
+        toast.error(data.error || '删除失败');
+      }
+    } catch (error) {
+      console.error('删除小说失败:', error);
+      toast.error('删除失败，请重试');
+    }
+  };
+
+  // 导出小说
+  const handleExportNovel = async (novel: Novel, e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止触发选择
+
+    try {
+      const response = await fetch(`${API_URL}/files/novels/${novel.id}/export`);
+
+      if (!response.ok) {
+        const data = await response.json();
+        toast.error(data.detail || '导出失败');
+        return;
+      }
+
+      // 下载文件
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${novel.name}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('导出成功');
+    } catch (error) {
+      console.error('导出小说失败:', error);
+      toast.error('导出失败，请重试');
+    }
   };
 
   return (
@@ -236,16 +313,46 @@ export function MainLayout({ children }: MainLayoutProps) {
                   novels.map((novel) => (
                     <div
                       key={novel.id}
-                      className={`p-2 rounded-md cursor-pointer text-sm transition-colors ${
+                      className={`p-2 rounded-md cursor-pointer text-sm transition-colors group ${
                         currentNovel?.id === novel.id
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted hover:bg-muted/80'
                       }`}
                       onClick={() => setCurrentNovel(novel)}
                     >
-                      <div className="font-medium">{novel.name}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium truncate flex-1">{novel.name}</div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-6 w-6 ${
+                              currentNovel?.id === novel.id
+                                ? 'text-primary-foreground hover:bg-primary-foreground/20'
+                                : 'text-muted-foreground hover:bg-muted-foreground/20'
+                            }`}
+                            onClick={(e) => handleExportNovel(novel, e)}
+                            title="导出"
+                          >
+                            <Download className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-6 w-6 ${
+                              currentNovel?.id === novel.id
+                                ? 'text-primary-foreground hover:bg-primary-foreground/20'
+                                : 'text-muted-foreground hover:bg-muted-foreground/20 hover:text-destructive'
+                            }`}
+                            onClick={(e) => handleDeleteNovel(novel, e)}
+                            title="删除"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
                       <div className={`text-xs ${currentNovel?.id === novel.id ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                        {(novel.chapter_count ?? novel.chapterCount ?? 0)} 章 · {((novel.word_count ?? novel.wordCount ?? 0) as number).toLocaleString()} 字
+                        {((novel as Record<string, unknown>).chapter_count ?? novel.chapterCount ?? 0) as number} 章 · {((novel as Record<string, unknown>).word_count ?? novel.wordCount ?? 0) as number} 字
                       </div>
                     </div>
                   ))

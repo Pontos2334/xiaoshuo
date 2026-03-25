@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from fastapi import Depends
 import os
@@ -8,7 +9,7 @@ import uuid
 import logging
 
 from app.models.database import get_db
-from app.models.models import Novel
+from app.models.models import Novel, Character, CharacterRelation, PlotNode, PlotConnection, Inspiration
 from app.models.schemas import NovelResponse, NovelCreate, ApiResponse
 from app.core.file_utils import safe_read_file, safe_write_file
 
@@ -34,7 +35,8 @@ async def get_novels(db: Session = Depends(get_db)):
     return novels
 
 
-@router.get("/novels/{novel_id}", response_model=ApiResponse)
+# 小说详情、删除、导出 - 使用不同路径避免冲突
+@router.get("/novels/{novel_id}/detail", response_model=ApiResponse)
 async def get_novel_content(novel_id: str, db: Session = Depends(get_db)):
     """获取小说内容"""
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
@@ -55,6 +57,76 @@ async def get_novel_content(novel_id: str, db: Session = Depends(get_db)):
             "novel": NovelResponse.model_validate(novel).model_dump(),
             "content": content,
             "outline": outline
+        }
+    )
+
+
+@router.delete("/novels/{novel_id}", response_model=ApiResponse)
+async def delete_novel(novel_id: str, db: Session = Depends(get_db)):
+    """删除小说及其所有相关数据"""
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(status_code=404, detail="小说不存在")
+
+    novel_name = novel.name
+    content_path = novel.content_path
+
+    # 删除关联的数据（按依赖顺序）
+    # 1. 删除灵感
+    db.query(Inspiration).filter(Inspiration.novel_id == novel_id).delete()
+
+    # 2. 删除情节连接
+    db.query(PlotConnection).filter(PlotConnection.novel_id == novel_id).delete()
+
+    # 3. 删除情节节点
+    db.query(PlotNode).filter(PlotNode.novel_id == novel_id).delete()
+
+    # 4. 删除人物关系
+    db.query(CharacterRelation).filter(CharacterRelation.novel_id == novel_id).delete()
+
+    # 5. 删除人物
+    db.query(Character).filter(Character.novel_id == novel_id).delete()
+
+    # 6. 删除小说记录
+    db.delete(novel)
+    db.commit()
+
+    # 7. 尝试删除文件（如果是在 data/novels 目录下）
+    if content_path and "data/novels" in content_path:
+        try:
+            if os.path.exists(content_path):
+                os.remove(content_path)
+                logger.info(f"已删除小说文件: {content_path}")
+        except Exception as e:
+            logger.warning(f"删除小说文件失败: {e}")
+
+    return ApiResponse(
+        success=True,
+        data={"message": f"已删除小说《{novel_name}》"}
+    )
+
+
+@router.get("/novels/{novel_id}/export")
+async def export_novel(novel_id: str, db: Session = Depends(get_db)):
+    """导出小说内容"""
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(status_code=404, detail="小说不存在")
+
+    content = ""
+    if novel.content_path:
+        content = safe_read_file(novel.content_path)
+
+    if not content:
+        raise HTTPException(status_code=400, detail="小说内容为空")
+
+    # 返回为文本文件下载
+    filename = f"{novel.name}.txt"
+    return PlainTextResponse(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, field_validator, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
@@ -13,10 +13,12 @@ def to_camel(string: str) -> str:
 class CamelCaseModel(BaseModel):
     """自动将字段名转换为 camelCase 的基类"""
 
-    class Config:
-        from_attributes = True
-        populate_by_name = True
-        alias_generator = to_camel
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        alias_generator=to_camel,
+        serialize_by_alias=True,  # 序列化时也使用别名
+    )
 
 
 # ========== 小说相关 ==========

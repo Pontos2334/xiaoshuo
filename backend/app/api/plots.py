@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime
 import logging
 
 from app.models.database import get_db
@@ -15,6 +16,7 @@ from app.models.schemas import (
     ApiResponse
 )
 from app.services.plot_analyzer import PlotAnalyzer
+from app.services.chapter_splitter import chapter_splitter
 from app.core.file_utils import safe_read_file
 
 router = APIRouter()
@@ -40,8 +42,19 @@ async def get_plot_node(plot_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/analyze", response_model=ApiResponse)
-async def analyze_plots(novel_id: str, db: Session = Depends(get_db)):
-    """AI分析小说内容，生成情节节点"""
+async def analyze_plots(
+    novel_id: str,
+    mode: str = Query('full', description="分析模式: full(全量) | incremental(增量)"),
+    db: Session = Depends(get_db)
+):
+    """
+    AI分析小说内容，生成情节节点
+
+    Args:
+        mode: 分析模式
+            - 'full': 全量分析，会重新分析所有内容（默认）
+            - 'incremental': 增量分析，只分析新章节，保留用户手动修改的数据
+    """
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if not novel:
         raise HTTPException(status_code=404, detail="小说不存在")
@@ -54,9 +67,82 @@ async def analyze_plots(novel_id: str, db: Session = Depends(get_db)):
     if novel.outline_path:
         outline = safe_read_file(novel.outline_path)
 
-    # 使用AI分析
+    if not content:
+        raise HTTPException(status_code=400, detail="小说内容为空")
+
+    # 获取当前分析版本
+    current_version = (novel.analysis_version or 0) + 1
+
     analyzer = PlotAnalyzer()
-    plot_nodes = await analyzer.analyze(content, outline)
+
+    # 根据模式选择分析策略
+    if mode == 'incremental' and novel.last_analyzed_chapter and novel.last_analyzed_chapter > 0:
+        # 增量分析模式 - 只分析新章节
+        logger.info(f"情节增量分析模式: 从第 {novel.last_analyzed_chapter + 1} 章开始")
+
+        new_chapters = chapter_splitter.get_chapters_from_position(content, novel.last_analyzed_chapter + 1)
+        if not new_chapters:
+            logger.info("没有新章节需要分析")
+            all_nodes = db.query(PlotNode).filter(PlotNode.novel_id == novel_id).all()
+            return ApiResponse(
+                success=True,
+                data={
+                    'nodes': [PlotNodeResponse.model_validate(n).model_dump() for n in all_nodes],
+                    'mode': mode,
+                    'analyzed_chapter': novel.last_analyzed_chapter,
+                    'message': '没有新章节需要分析'
+                }
+            )
+
+        # 合并新章节内容
+        new_content_parts = []
+        for chapter in new_chapters:
+            if chapter[2]:  # 章节内容
+                new_content_parts.append(chapter[2])
+        new_content = '\n\n'.join(new_content_parts)
+
+        # 分析新内容
+        plot_nodes = await analyzer.analyze(new_content, outline)
+
+        # 获取现有情节节点
+        existing_nodes = db.query(PlotNode).filter(PlotNode.novel_id == novel_id).all()
+        existing_titles = {n.title for n in existing_nodes}
+
+        # 过滤掉已存在的情节（避免重复）
+        new_plot_nodes = []
+        for node in plot_nodes:
+            if node.get('title') not in existing_titles:
+                new_plot_nodes.append(node)
+
+        plot_nodes = new_plot_nodes
+        new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+    else:
+        # 全量分析模式
+        logger.info("情节全量分析模式")
+
+        # 全量分析前，先删除该小说的所有旧情节数据
+        logger.info(f"删除小说 {novel_id} 的旧情节数据...")
+
+        # 删除情节连接
+        deleted_connections = db.query(PlotConnection).filter(
+            PlotConnection.novel_id == novel_id
+        ).delete()
+
+        # 删除情节节点
+        deleted_nodes = db.query(PlotNode).filter(
+            PlotNode.novel_id == novel_id
+        ).delete()
+
+        db.commit()
+        logger.info(f"已删除 {deleted_nodes} 个情节节点, {deleted_connections} 个情节连接")
+
+        plot_nodes = await analyzer.analyze(content, outline)
+        new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+
+    # 标记数据来源
+    for node in plot_nodes:
+        node['source'] = 'ai'
+        node['ai_version'] = current_version
 
     # 保存到数据库
     for node_data in plot_nodes:
@@ -66,8 +152,12 @@ async def analyze_plots(novel_id: str, db: Session = Depends(get_db)):
         ).first()
 
         if existing:
-            for key, value in node_data.items():
-                setattr(existing, key, value)
+            # 只更新 AI 生成的数据，保留用户修改的
+            if existing.source not in ('user', 'ai_modified'):
+                for key, value in node_data.items():
+                    setattr(existing, key, value)
+                existing.source = 'ai'
+                existing.ai_version = current_version
         else:
             new_node = PlotNode(
                 novel_id=novel_id,
@@ -75,13 +165,23 @@ async def analyze_plots(novel_id: str, db: Session = Depends(get_db)):
             )
             db.add(new_node)
 
+    # 更新小说的分析进度
+    novel.last_analyzed_chapter = new_max_chapter
+    novel.last_analyzed_at = datetime.utcnow()
+    novel.analysis_version = current_version
+
     db.commit()
 
     # 返回所有情节节点
     all_nodes = db.query(PlotNode).filter(PlotNode.novel_id == novel_id).all()
     return ApiResponse(
         success=True,
-        data=[PlotNodeResponse.model_validate(n).model_dump() for n in all_nodes]
+        data={
+            'nodes': [PlotNodeResponse.model_validate(n).model_dump() for n in all_nodes],
+            'mode': mode,
+            'analyzed_chapter': new_max_chapter,
+            'version': current_version,
+        }
     )
 
 
@@ -91,12 +191,16 @@ async def update_plot_node(
     data: PlotNodeUpdate,
     db: Session = Depends(get_db)
 ):
-    """更新情节节点"""
+    """更新情节节点（用户手动编辑会标记为 ai_modified）"""
     node = db.query(PlotNode).filter(PlotNode.id == plot_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="情节节点不存在")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # 标记为用户修改
+    update_data['source'] = 'ai_modified'
+
     for key, value in update_data.items():
         setattr(node, key, value)
 

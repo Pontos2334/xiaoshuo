@@ -2,11 +2,11 @@
 
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { PlotNode } from '@/types';
+import type { PlotNode as PlotNodeType } from '@/types';
 import { Badge } from '@/components/ui/badge';
 
 interface PlotNodeProps {
-  data: PlotNode;
+  data: PlotNodeType;
 }
 
 function PlotNode({ data }: PlotNodeProps) {

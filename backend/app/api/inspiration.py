@@ -6,8 +6,12 @@ from app.models.database import get_db
 from app.models.models import Inspiration, Novel, Character, PlotNode
 from app.models.schemas import InspirationRequest, InspirationResponse, ApiResponse
 from app.services.inspiration_gen import InspirationGenerator
+from app.core.file_utils import safe_read_file
 
 router = APIRouter()
+
+# 原文片段最大长度
+MAX_ORIGINAL_TEXT_LENGTH = 2000
 
 
 def get_targets_by_ids(db: Session, target_ids: List[str]):
@@ -30,6 +34,42 @@ def get_targets_by_ids(db: Session, target_ids: List[str]):
     return characters, plot_nodes
 
 
+def get_original_text_context(novel_id: str, db: Session, max_length: int = MAX_ORIGINAL_TEXT_LENGTH) -> Optional[str]:
+    """获取小说原文作为风格参考"""
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel or not novel.content_path:
+        return None
+
+    content = safe_read_file(novel.content_path)
+    if not content:
+        return None
+
+    # 取原文的前面部分作为风格参考
+    return content[:max_length]
+
+
+def get_plot_original_text(plot_nodes: List[PlotNode], novel_id: str, db: Session, max_length: int = 1000) -> Optional[str]:
+    """获取情节相关的原文片段"""
+    if not plot_nodes:
+        return get_original_text_context(novel_id, db, max_length)
+
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel or not novel.content_path:
+        return None
+
+    content = safe_read_file(novel.content_path)
+    if not content:
+        return None
+
+    # 如果情节有原文引用，优先使用
+    for plot in plot_nodes:
+        if hasattr(plot, 'content_ref') and plot.content_ref:
+            return plot.content_ref[:max_length]
+
+    # 否则返回小说开头作为风格参考
+    return content[:max_length]
+
+
 @router.post("/scene", response_model=ApiResponse)
 async def get_scene_inspiration(
     request: InspirationRequest,
@@ -43,11 +83,17 @@ async def get_scene_inspiration(
 
     characters, plot_nodes = get_targets_by_ids(db, target_ids)
 
+    # 获取原文作为风格参考
+    original_text = None
+    if request.novel_id:
+        original_text = get_original_text_context(request.novel_id, db)
+
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_scene_inspiration(
         characters=characters,
         plot_nodes=plot_nodes,
+        original_text=original_text,
         context=request.context
     )
 
@@ -87,11 +133,17 @@ async def get_plot_inspiration(
             PlotNode.novel_id == request.novel_id
         ).all()[:5]  # 限制数量
 
+    # 获取原文
+    original_text = None
+    if request.novel_id:
+        original_text = get_plot_original_text(plot_nodes, request.novel_id, db)
+
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_plot_inspiration(
         plot_nodes=plot_nodes,
         characters=characters,
+        original_text=original_text,
         context=request.context
     )
 
@@ -136,11 +188,17 @@ async def get_continue_inspiration(
                 PlotNode.novel_id == request.novel_id
             ).all()
 
+    # 获取原文
+    original_text = None
+    if request.novel_id:
+        original_text = get_original_text_context(request.novel_id, db)
+
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_continue_inspiration(
         characters=characters,
         plot_nodes=plot_nodes,
+        original_text=original_text,
         context=request.context
     )
 
@@ -176,11 +234,17 @@ async def get_character_inspiration(
     if not characters:
         raise HTTPException(status_code=400, detail="请选择至少一个角色")
 
+    # 获取原文
+    original_text = None
+    if request.novel_id:
+        original_text = get_original_text_context(request.novel_id, db)
+
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_character_inspiration(
         characters=characters,
         plot_nodes=plot_nodes,
+        original_text=original_text,
         context=request.context
     )
 
@@ -217,11 +281,17 @@ async def get_emotion_inspiration(
     if not plot_nodes:
         raise HTTPException(status_code=400, detail="请选择至少一个情节")
 
+    # 获取原文
+    original_text = None
+    if request.novel_id:
+        original_text = get_plot_original_text(plot_nodes, request.novel_id, db)
+
     # 生成灵感
     generator = InspirationGenerator()
     inspiration_content = await generator.generate_emotion_inspiration(
         plot_nodes=plot_nodes,
         characters=characters,
+        original_text=original_text,
         context=request.context
     )
 

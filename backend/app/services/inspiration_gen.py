@@ -3,67 +3,127 @@ from app.agent.client import ClaudeAgentClient
 
 
 class InspirationGenerator:
-    """灵感生成服务"""
+    """灵感生成服务 - 基于原著设定生成忠实的内容建议"""
 
     def __init__(self):
         self.agent = ClaudeAgentClient()
+
+    def _build_character_context(self, characters: List[Any], max_length: int = 1500) -> str:
+        """构建详细的人物设定上下文"""
+        if not characters:
+            return ""
+
+        context_parts = []
+        total_length = 0
+
+        for c in characters:
+            char_text = f"""【{c.name}】
+- 身份：{self._get_identity(c)}
+- 性格特点：{self._get_personality(c)}
+- 能力技能：{self._get_abilities(c)}
+- 故事背景：{self._get_summary(c)}
+- 别名绰号：{', '.join(c.aliases) if hasattr(c, 'aliases') and c.aliases else '无'}"""
+
+            if total_length + len(char_text) > max_length:
+                break
+            context_parts.append(char_text)
+            total_length += len(char_text)
+
+        return "\n\n".join(context_parts)
+
+    def _build_plot_context(self, plot_nodes: List[Any], max_length: int = 1000) -> str:
+        """构建情节上下文"""
+        if not plot_nodes:
+            return ""
+
+        context_parts = []
+        total_length = 0
+
+        for p in sorted(plot_nodes, key=lambda x: x.chapter if x.chapter else 0):
+            plot_text = f"""【第{p.chapter}章：{p.title}】
+- 情节概述：{p.summary or '暂无'}
+- 主要情绪：{p.emotion or '未知'}
+- 涉及人物：{', '.join(p.characters) if hasattr(p, 'characters') and p.characters else '未知'}
+- 原文参考：{(p.content_ref or '')[:200]}"""
+
+            if total_length + len(plot_text) > max_length:
+                break
+            context_parts.append(plot_text)
+            total_length += len(plot_text)
+
+        return "\n\n".join(context_parts)
+
+    def _get_style_constraints(self) -> str:
+        """获取写作风格约束"""
+        return """【重要约束 - 必须严格遵守】
+1. **忠实原著设定**：所有建议必须完全基于已提供的人物设定和情节背景，不得创造与原著矛盾的内容
+2. **保持人物一致性**：人物的行为、对话风格、性格表现必须与给定设定完全一致
+3. **延续已有风格**：模仿原著的叙事风格和语言特点
+4. **不创造新设定**：不要添加新的人物背景、世界观设定或能力体系
+5. **不改变已确立的关系**：人物关系必须与原著保持一致
+
+如果原著信息不足，请明确指出"原著暂无相关设定"，而不是自行编造。"""
+
+    def _get_style_guide(self) -> str:
+        """获取风格指南"""
+        return """【写作风格指南】
+- 对话要符合人物性格，有辨识度
+- 描写要具体，避免空洞的形容词
+- 情节推进要有逻辑，符合人物动机
+- 情感表达要自然，不刻意煽情
+- 细节要服务于整体，不堆砌"""
 
     async def generate_scene_inspiration(
         self,
         characters: List[Any],
         plot_nodes: List[Any],
+        original_text: Optional[str] = None,
         context: Optional[str] = None
     ) -> str:
         """基于选定的人物和情节生成场景灵感"""
-        # 构建人物信息
-        char_info = ""
-        if characters:
-            char_info = "选定的人物：\n" + "\n".join([
-                f"""- **{c.name}**
-  身份：{self._get_identity(c)}
-  性格：{self._get_personality(c)}
-  简介：{self._get_summary(c)[:100]}"""
-                for c in characters
-            ])
 
-        # 构建情节信息
-        plot_info = ""
-        if plot_nodes:
-            plot_info = "选定的情节：\n" + "\n".join([
-                f"- 第{p.chapter}章 **{p.title}**：{p.summary[:80] if p.summary else ''}...（情绪：{p.emotion or '未知'}）"
-                for p in sorted(plot_nodes, key=lambda x: x.chapter if x.chapter else 0)
-            ])
+        char_context = self._build_character_context(characters)
+        plot_context = self._build_plot_context(plot_nodes)
 
-        # 分析人物关系
-        relationship_hint = ""
-        if len(characters) >= 2:
-            names = [c.name for c in characters]
-            relationship_hint = f"\n\n请注意这些人物之间可能存在的关系互动：{', '.join(names)}"
+        # 原文风格参考
+        style_reference = ""
+        if original_text:
+            style_reference = f"""【原文风格参考】（以下片段展示了原著的写作风格）
+{original_text[:800]}
+"""
 
-        prompt = f"""你是一位资深的小说创作顾问。请基于以下选定的人物和情节，生成场景描写灵感和创作建议。
+        prompt = f"""你是一位专业的小说创作顾问，正在帮助作者延续其正在创作的小说。
 
-{char_info}
+{self._get_style_constraints()}
 
-{plot_info}
-{relationship_hint}
+{self._get_style_guide()}
 
-{f"作者额外说明：{context}" if context else ""}
+---
 
-请从以下几个角度提供详细的创作灵感：
+【已确立的人物设定】
+{char_context if char_context else '（未选择人物）'}
 
-1. **场景构想**：这些人物在这些情节中可能产生什么样的互动场景？请描述2-3个可能的场景。
+【已发生的情节】
+{plot_context if plot_context else '（未选择情节）'}
 
-2. **冲突与张力**：这些人物之间可能产生什么矛盾或冲突？如何利用情节背景制造张力？
+{style_reference}
 
-3. **对话灵感**：给出一些精彩的对话片段示例，体现人物性格和关系。
+{f"【作者需求】{context}" if context else ""}
 
-4. **心理描写**：如何深入刻画人物在这些场景中的内心活动？
+---
 
-5. **情节推进**：基于选定的人物组合，可以如何推动情节发展？有什么意想不到的展开方向？
+请基于以上**已有的、确定的**设定，提供场景创作建议。
 
-6. **氛围营造**：如何通过环境、节奏和细节描写来烘托场景氛围？
+要求：
+1. **场景构想**：基于这些人物的性格和已有情节，他们可能产生什么互动？描述1-2个**符合原著逻辑**的场景方向（不要具体写出来，只给方向建议）
 
-请用中文回答，语言生动有感染力，提供具体可操作的创作建议。"""
+2. **对话风格**：分析每个人物的说话特点，给出**符合其性格**的对话要点（不是具体对话，而是风格指导）
+
+3. **情绪处理**：这个场景应该传递什么情绪？如何通过人物的反应来体现？
+
+4. **写作提示**：基于原著风格，这个场景应该注意什么？
+
+请用简洁、实用的语言回答。记住：你的角色是帮助作者更好地写他/她自己的故事，而不是替作者创造新内容。"""
 
         return await self.agent.generate(prompt)
 
@@ -71,43 +131,49 @@ class InspirationGenerator:
         self,
         plot_nodes: List[Any],
         characters: List[Any],
+        original_text: Optional[str] = None,
         context: Optional[str] = None
     ) -> str:
         """为指定情节生成写作灵感"""
-        # 构建上下文
-        plot_info = ""
-        if plot_nodes:
-            plot_info = "选定情节：\n" + "\n".join([
-                f"""- 第{p.chapter}章 **{p.title}**
-  概述：{p.summary or '暂无'}
-  主要情绪：{p.emotion or '未知'}
-  重要程度：{p.importance or 5}/10"""
-                for p in plot_nodes
-            ])
 
-        char_info = ""
-        if characters:
-            char_info = "涉及角色：\n" + "\n".join([
-                f"- {c.name}：{self._get_summary(c)[:100]}"
-                for c in characters
-            ])
+        plot_context = self._build_plot_context(plot_nodes)
+        char_context = self._build_character_context(characters, max_length=800)
 
-        prompt = f"""你是一位资深的小说创作顾问。请为以下情节提供写作灵感和建议。
+        style_reference = ""
+        if original_text:
+            style_reference = f"""【原文风格参考】
+{original_text[:600]}
+"""
 
-{plot_info}
+        prompt = f"""你是一位专业的小说创作顾问。
 
-{char_info}
+{self._get_style_constraints()}
 
-{f"作者额外说明：{context}" if context else ""}
+---
 
-请从以下几个角度提供建议：
-1. **情节发展建议**：如何让这个情节更加引人入胜？
-2. **冲突设计**：可以添加什么样的冲突或矛盾？
-3. **伏笔建议**：可以埋下什么样的伏笔？
-4. **人物塑造**：如何通过这个情节深化人物形象？
-5. **情绪渲染**：如何增强当前情绪的表达？
+【当前情节】
+{plot_context if plot_context else '（未选择情节）'}
 
-请用中文回答，语言生动有感染力。"""
+【相关人物】
+{char_context if char_context else '（未选择人物）'}
+
+{style_reference}
+
+{f"【作者需求】{context}" if context else ""}
+
+---
+
+请基于已有设定，为这个情节提供写作建议：
+
+1. **情节深化方向**：基于现有设定，这个情节可以从哪些角度深入？（不要创造新的设定或人物背景）
+
+2. **人物表现建议**：涉及的人物在这个情节中应该如何表现才符合其性格？
+
+3. **情绪渲染**：如何强化当前情绪？给出具体的、符合原著风格的建议
+
+4. **细节建议**：可以添加哪些**符合世界观**的细节描写？
+
+请确保所有建议都基于已提供的信息，不要编造新设定。"""
 
         return await self.agent.generate(prompt)
 
@@ -115,41 +181,52 @@ class InspirationGenerator:
         self,
         characters: List[Any],
         plot_nodes: List[Any],
+        original_text: Optional[str] = None,
         context: Optional[str] = None
     ) -> str:
         """生成后续情节发展建议"""
-        # 构建角色信息
-        char_info = ""
-        if characters:
-            char_info = "主要角色：\n" + "\n".join([
-                f"- {c.name}（{self._get_personality(c)}）"
-                for c in characters[:10]  # 限制数量
-            ])
 
-        # 构建情节概要
-        plot_info = ""
-        if plot_nodes:
-            plot_info = "已发生的情节：\n" + "\n".join([
-                f"- 第{p.chapter}章 {p.title}：{(p.summary or '')[:50]}..."
-                for p in sorted(plot_nodes, key=lambda x: x.chapter if x.chapter else 0)[-10:]  # 只取最近10个
-            ])
+        char_context = self._build_character_context(characters[:8], max_length=1200)
 
-        prompt = f"""你是一位资深的小说创作顾问。请基于以下信息，提供后续情节发展的建议。
+        # 只取最近的情节
+        recent_plots = sorted(plot_nodes, key=lambda x: x.chapter if x.chapter else 0)[-8:] if plot_nodes else []
+        plot_context = self._build_plot_context(recent_plots, max_length=800)
 
-{char_info}
+        style_reference = ""
+        if original_text:
+            style_reference = f"""【原文风格参考】
+{original_text[:600]}
+"""
 
-{plot_info}
+        prompt = f"""你是一位专业的小说创作顾问。
 
-{f"作者额外说明：{context}" if context else ""}
+{self._get_style_constraints()}
 
-请从以下几个角度提供建议：
-1. **近期发展方向**：接下来1-3章可以写什么？
-2. **中期规划**：5-10章后的故事走向建议
-3. **高潮设计**：可以考虑什么样的高潮情节？
-4. **角色发展**：哪些角色需要更多的戏份和发展？
-5. **悬念设置**：如何让读者保持阅读兴趣？
+---
 
-请用中文回答，提供具体可行的建议。"""
+【主要人物设定】
+{char_context if char_context else '（暂无人物信息）'}
+
+【最近情节】
+{plot_context if plot_context else '（暂无情节信息）'}
+
+{style_reference}
+
+{f"【作者需求】{context}" if context else ""}
+
+---
+
+请基于**已有的**人物设定和情节发展，提供后续方向建议：
+
+1. **人物驱动**：基于各人物的**已确立**性格和动机，他们接下来可能有什么行动？（不是创造新的动机，而是分析已有的）
+
+2. **线索延续**：已有的情节中有什么可以继续发展的线索？
+
+3. **可能的方向**：给出2-3个**符合原著逻辑**的发展方向（不要创造新设定，只分析可能性）
+
+4. **需要注意的点**：在继续写作时，哪些已确立的设定需要保持一致？
+
+记住：你的建议应该帮助作者更好地延续他/她自己的故事，而不是把故事引向完全不同的方向。"""
 
         return await self.agent.generate(prompt)
 
@@ -157,44 +234,56 @@ class InspirationGenerator:
         self,
         characters: List[Any],
         plot_nodes: List[Any],
+        original_text: Optional[str] = None,
         context: Optional[str] = None
     ) -> str:
         """为指定角色生成发展建议"""
-        char_info = ""
-        if characters:
-            char_info = "选定角色：\n" + "\n".join([
-                f"""- **{c.name}**
-  别名/绰号：{', '.join(c.aliases) if hasattr(c, 'aliases') and c.aliases else '无'}
-  基本信息：{self._get_basic_info(c)}
-  性格特点：{self._get_personality(c)}
-  能力/技能：{self._get_abilities(c)}
-  故事简介：{self._get_summary(c)}"""
-                for c in characters
-            ])
 
-        plot_context = ""
+        char_context = self._build_character_context(characters, max_length=2000)
+
+        related_plots = ""
         if plot_nodes:
-            plot_context = "相关情节：\n" + "\n".join([
-                f"- 第{p.chapter}章 {p.title}"
+            related_plots = "【角色相关情节】\n" + "\n".join([
+                f"- 第{p.chapter}章：{p.title}"
                 for p in plot_nodes[:5]
             ])
 
-        prompt = f"""你是一位资深的小说创作顾问。请为以下角色提供发展建议。
+        style_reference = ""
+        if original_text:
+            style_reference = f"""【角色在原文中的表现】
+{original_text[:600]}
+"""
 
-{char_info}
+        prompt = f"""你是一位专业的小说创作顾问。
 
-{plot_context}
+{self._get_style_constraints()}
 
-{f"作者额外说明：{context}" if context else ""}
+---
 
-请从以下几个角度提供建议：
-1. **角色弧线**：这个角色应该有怎样的成长轨迹？
-2. **内在冲突**：角色内心可以有什么样的矛盾和挣扎？
-3. **外在挑战**：角色应该面对什么样的挑战？
-4. **关系发展**：角色与其他人物的关系如何发展？
-5. **关键转折**：角色的命运转折点可能是什么？
+【角色详细设定】
+{char_context if char_context else '（未选择角色）'}
 
-请用中文回答，深入挖掘角色的潜力。"""
+{related_plots}
+
+{style_reference}
+
+{f"【作者需求】{context}" if context else ""}
+
+---
+
+请基于**已确立的角色设定**，提供角色发展建议：
+
+1. **角色内核**：基于已有的性格特点，这个角色的核心是什么？（分析而非创造）
+
+2. **内在矛盾**：从**已有的**性格特点中，可以挖掘出什么内在矛盾？
+
+3. **成长空间**：在**不改变角色本质**的前提下，这个角色可以如何成长？
+
+4. **表现建议**：如何更好地展现这个角色**已有的**特点？
+
+5. **边界提醒**：在写作这个角色时，哪些**已确立的设定**不能违背？
+
+不要为角色添加新的背景故事或能力，所有建议都要基于已提供的信息。"""
 
         return await self.agent.generate(prompt)
 
@@ -202,41 +291,60 @@ class InspirationGenerator:
         self,
         plot_nodes: List[Any],
         characters: List[Any],
+        original_text: Optional[str] = None,
         context: Optional[str] = None
     ) -> str:
         """为指定情节生成情绪渲染建议"""
-        plot_info = ""
+
+        plot_context = self._build_plot_context(plot_nodes)
+        char_context = self._build_character_context(characters, max_length=600)
+
+        # 提取目标情绪
+        target_emotion = ""
         if plot_nodes:
-            plot_info = "选定情节：\n" + "\n".join([
-                f"""- 第{p.chapter}章 **{p.title}**
-  概述：{p.summary or '暂无'}
-  目标情绪：{p.emotion or '未知'}"""
-                for p in plot_nodes
-            ])
+            emotions = [p.emotion for p in plot_nodes if p.emotion]
+            if emotions:
+                target_emotion = f"【目标情绪】：{', '.join(emotions)}"
 
-        char_info = ""
-        if characters:
-            char_info = "涉及人物：\n" + "\n".join([
-                f"- {c.name}（{self._get_personality(c)[:20]}）"
-                for c in characters
-            ])
+        style_reference = ""
+        if original_text:
+            style_reference = f"""【原文情绪表达示例】
+{original_text[:500]}
+"""
 
-        prompt = f"""你是一位资深的小说创作顾问。请为以下情节提供情绪渲染的建议。
+        prompt = f"""你是一位专业的小说创作顾问。
 
-{plot_info}
+{self._get_style_constraints()}
 
-{char_info}
+---
 
-{f"作者额外说明：{context}" if context else ""}
+【当前情节】
+{plot_context if plot_context else '（未选择情节）'}
 
-请从以下几个角度提供建议：
-1. **场景描写**：如何通过环境描写烘托情绪？
-2. **人物反应**：人物应该如何表达情绪？
-3. **对话设计**：如何通过对话传递情绪？
-4. **节奏控制**：如何控制叙事节奏来强化情绪？
-5. **感官描写**：可以加入哪些感官细节？
+{target_emotion}
 
-请用中文回答，提供具体可操作的写作技巧。"""
+【涉及人物】
+{char_context if char_context else '（未选择人物）'}
+
+{style_reference}
+
+{f"【作者需求】{context}" if context else ""}
+
+---
+
+请提供情绪渲染建议：
+
+1. **情绪基调**：基于情节内容，应该传递什么核心情绪？
+
+2. **人物反应**：基于各人物的**已有性格**，他们会有什么情绪反应？
+
+3. **环境烘托**：可以用什么样的环境描写来烘托情绪？（保持与世界观一致）
+
+4. **节奏控制**：如何通过叙事节奏来强化情绪效果？
+
+5. **具体技巧**：给出2-3个**符合原著风格**的情绪表达技巧
+
+所有建议都要基于已提供的人物设定和世界观，不要创造新的设定。"""
 
         return await self.agent.generate(prompt)
 
@@ -253,7 +361,7 @@ class InspirationGenerator:
         """获取人物性格"""
         if hasattr(char, 'personality') and char.personality:
             if isinstance(char.personality, list):
-                return ', '.join(char.personality[:3])
+                return ', '.join(char.personality[:5])
             return str(char.personality)
         return '性格未知'
 
@@ -265,7 +373,8 @@ class InspirationGenerator:
         """获取基本信息"""
         if hasattr(char, 'basic_info') and char.basic_info:
             if isinstance(char.basic_info, dict):
-                return str(char.basic_info)
+                items = [f"{k}: {v}" for k, v in char.basic_info.items()]
+                return ', '.join(items)
             return str(char.basic_info)
         return '未知'
 
@@ -273,6 +382,6 @@ class InspirationGenerator:
         """获取人物能力"""
         if hasattr(char, 'abilities') and char.abilities:
             if isinstance(char.abilities, list):
-                return ', '.join(char.abilities)
+                return ', '.join(char.abilities[:5])
             return str(char.abilities)
         return '未知'
