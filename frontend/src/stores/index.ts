@@ -1,5 +1,9 @@
 import { create } from 'zustand';
+import { shallow } from 'zustand/shallow';
 import { Character, CharacterRelation, PlotNode, PlotConnection, Novel, Inspiration } from '@/types';
+
+// 导出 shallow 用于组件中的性能优化
+export { shallow };
 
 // 小说Store
 interface NovelState {
@@ -103,6 +107,9 @@ interface InspirationState {
   setCurrentInspiration: (inspiration: string | null) => void;
   setIsLoading: (loading: boolean) => void;
   addInspiration: (inspiration: Inspiration) => void;
+  updateInspiration: (id: string, data: Partial<Inspiration>) => void;
+  deleteInspiration: (id: string) => void;
+  clearInspirations: () => void;
 }
 
 export const useInspirationStore = create<InspirationState>((set) => ({
@@ -113,6 +120,13 @@ export const useInspirationStore = create<InspirationState>((set) => ({
   setCurrentInspiration: (inspiration) => set({ currentInspiration: inspiration }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   addInspiration: (inspiration) => set((state) => ({ inspirations: [...state.inspirations, inspiration] })),
+  updateInspiration: (id, data) => set((state) => ({
+    inspirations: state.inspirations.map((i) => (i.id === id ? { ...i, ...data } : i)),
+  })),
+  deleteInspiration: (id) => set((state) => ({
+    inspirations: state.inspirations.filter((i) => i.id !== id),
+  })),
+  clearInspirations: () => set({ inspirations: [] }),
 }));
 
 // UI状态Store

@@ -78,49 +78,83 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
                 return char_id
         return None
 
-    # 保存到 Neo4j
-    saved_count = 0
-    for rel_data in relations:
-        source_ref = rel_data.get("source_id", "")
-        target_ref = rel_data.get("target_id", "")
+    # Saga 模式：记录已写入的数据，用于回滚
+    saved_neo4j_ids: List[str] = []
+    saved_sqlite_ids: List[str] = []
 
-        source_id = find_character_id(source_ref)
-        target_id = find_character_id(target_ref)
+    try:
+        # Step 1: 保存到 Neo4j
+        for rel_data in relations:
+            source_ref = rel_data.get("source_id", "")
+            target_ref = rel_data.get("target_id", "")
 
-        if not source_id or not target_id:
-            logger.warning(f"跳过无效关系: {source_ref} -> {target_ref}")
-            continue
+            source_id = find_character_id(source_ref)
+            target_id = find_character_id(target_ref)
 
-        try:
-            character_relation_repo.create(novel_id, source_id, target_id, rel_data)
-            saved_count += 1
-        except Exception as e:
-            logger.error(f"保存关系到 Neo4j 失败: {e}")
+            if not source_id or not target_id:
+                logger.warning(f"跳过无效关系: {source_ref} -> {target_ref}")
+                continue
 
-        # 同时保存到 SQLite
-        existing = db.query(CharacterRelation).filter(
-            CharacterRelation.novel_id == novel_id,
-            CharacterRelation.source_id == source_id,
-            CharacterRelation.target_id == target_id
-        ).first()
+            try:
+                rel = character_relation_repo.create(novel_id, source_id, target_id, rel_data)
+                if rel:
+                    saved_neo4j_ids.append(rel.get("id"))
+            except Exception as e:
+                logger.error(f"保存关系到 Neo4j 失败: {e}")
 
-        if existing:
-            for key, value in rel_data.items():
-                if key not in ["source_id", "target_id"]:
-                    setattr(existing, key, value)
-        else:
-            new_rel = CharacterRelation(
-                novel_id=novel_id,
-                source_id=source_id,
-                target_id=target_id,
-                relation_type=rel_data.get("relation_type", ""),
-                description=rel_data.get("description", ""),
-                strength=rel_data.get("strength", 5),
-            )
-            db.add(new_rel)
+        # Step 2: 保存到 SQLite
+        for rel_data in relations:
+            source_ref = rel_data.get("source_id", "")
+            target_ref = rel_data.get("target_id", "")
 
-    db.commit()
-    logger.info(f"保存了 {saved_count} 个新关系")
+            source_id = find_character_id(source_ref)
+            target_id = find_character_id(target_ref)
+
+            if not source_id or not target_id:
+                continue
+
+            existing = db.query(CharacterRelation).filter(
+                CharacterRelation.novel_id == novel_id,
+                CharacterRelation.source_id == source_id,
+                CharacterRelation.target_id == target_id
+            ).first()
+
+            if existing:
+                for key, value in rel_data.items():
+                    if key not in ["source_id", "target_id"]:
+                        setattr(existing, key, value)
+                saved_sqlite_ids.append(existing.id)
+            else:
+                new_rel = CharacterRelation(
+                    novel_id=novel_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation_type=rel_data.get("relation_type", ""),
+                    description=rel_data.get("description", ""),
+                    strength=rel_data.get("strength", 5),
+                )
+                db.add(new_rel)
+                db.flush()
+                saved_sqlite_ids.append(new_rel.id)
+
+        # 两边都成功，提交事务
+        db.commit()
+        logger.info(f"成功保存 {len(saved_neo4j_ids)} 个 Neo4j 关系, {len(saved_sqlite_ids)} 个 SQLite 关系")
+
+    except Exception as e:
+        logger.error(f"保存关系失败，开始回滚: {e}")
+
+        # 回滚 Neo4j
+        for rel_id in saved_neo4j_ids:
+            try:
+                character_relation_repo.delete(rel_id)
+            except Exception as rollback_error:
+                logger.error(f"回滚 Neo4j 关系失败 {rel_id}: {rollback_error}")
+
+        # SQLite 自动回滚
+        db.rollback()
+
+        raise HTTPException(status_code=500, detail=f"保存关系失败: {str(e)}")
 
     # 返回所有关系
     all_relations = character_relation_repo.get_by_novel(novel_id)
@@ -213,37 +247,64 @@ async def analyze_characters(novel_id: str, db: Session = Depends(get_db)):
     analyzer = CharacterAnalyzer()
     characters = await analyzer.analyze(content)
 
-    # 保存到 Neo4j
-    saved_characters = []
-    for char_data in characters:
-        try:
-            char = character_repo.create(novel_id, char_data)
-            if char:
-                saved_characters.append(char)
-        except Exception as e:
-            logger.error(f"保存人物到 Neo4j 失败: {e}")
+    # Saga 模式：记录已写入的数据，用于回滚
+    saved_neo4j_ids: List[str] = []
+    saved_sqlite_ids: List[str] = []
 
-    # 同时保存到 SQLite（作为备份）
-    for char_data in characters:
-        existing = db.query(Character).filter(
-            Character.novel_id == novel_id,
-            Character.name == char_data.get("name")
-        ).first()
+    try:
+        # Step 1: 保存到 Neo4j
+        for char_data in characters:
+            try:
+                char = character_repo.create(novel_id, char_data)
+                if char:
+                    saved_neo4j_ids.append(char.get("id"))
+            except Exception as e:
+                logger.error(f"保存人物到 Neo4j 失败: {e}")
 
-        if existing:
-            for key, value in char_data.items():
-                setattr(existing, key, value)
-        else:
-            new_char = Character(
-                novel_id=novel_id,
-                **char_data
-            )
-            db.add(new_char)
+        # Step 2: 保存到 SQLite
+        for char_data in characters:
+            existing = db.query(Character).filter(
+                Character.novel_id == novel_id,
+                Character.name == char_data.get("name")
+            ).first()
 
-    db.commit()
+            if existing:
+                for key, value in char_data.items():
+                    setattr(existing, key, value)
+                saved_sqlite_ids.append(existing.id)
+            else:
+                new_char = Character(
+                    novel_id=novel_id,
+                    **char_data
+                )
+                db.add(new_char)
+                db.flush()  # 获取 ID 但不提交
+                saved_sqlite_ids.append(new_char.id)
+
+        # 两边都成功，提交事务
+        db.commit()
+        logger.info(f"成功保存 {len(saved_neo4j_ids)} 个 Neo4j 人物, {len(saved_sqlite_ids)} 个 SQLite 人物")
+
+    except Exception as e:
+        logger.error(f"保存人物失败，开始回滚: {e}")
+
+        # 回滚 Neo4j
+        for char_id in saved_neo4j_ids:
+            try:
+                character_repo.delete(char_id)
+            except Exception as rollback_error:
+                logger.error(f"回滚 Neo4j 人物失败 {char_id}: {rollback_error}")
+
+        # SQLite 自动回滚
+        db.rollback()
+
+        raise HTTPException(status_code=500, detail=f"保存人物失败: {str(e)}")
 
     # 返回所有人物
-    all_characters = character_repo.get_by_novel(novel_id) or saved_characters
+    all_characters = character_repo.get_by_novel(novel_id) or []
+    if not all_characters:
+        all_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
+
     return ApiResponse(
         success=True,
         data=all_characters

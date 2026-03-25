@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import files, characters, plots, inspiration, search, graph, chat, assistant
 from app.models.database import engine, Base
 from app.core.logging_config import setup_logging
+from app.core.config import settings
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -27,13 +28,14 @@ app.add_exception_handler(AppException, app_exception_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
-# CORS配置
+# CORS配置 - 使用统一的配置类
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js开发服务器
+    allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    max_age=600,
 )
 
 # 注册路由

@@ -10,22 +10,21 @@ import {
   useNodesState,
   useEdgesState,
   MarkerType,
-  useReactFlow,
-  Panel,
   Controls,
 } from '@xyflow/react';
-import dagre from 'dagre';
 import '@xyflow/react/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useCharacterStore } from '@/stores';
-import { Character, CharacterRelation } from '@/types';
-import { RefreshCw, Edit2, Trash2, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { Character } from '@/types';
+import { RefreshCw, Edit2, Trash2, Loader2, Plus, X } from 'lucide-react';
 import { CharacterNode } from './CharacterNode';
+import { getLayoutedElements } from '@/lib/layoutUtils';
 
 interface CharacterGraphProps {
   onAnalyze?: () => void;
@@ -35,41 +34,6 @@ interface CharacterGraphProps {
 const nodeTypes = {
   characterNode: CharacterNode,
 };
-
-// Dagre 布局配置
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
-
-const nodeWidth = 150;
-const nodeHeight = 80;
-
-function getLayoutedElements(nodes: Node[], edges: Edge[], direction = 'TB') {
-  const isHorizontal = direction === 'LR';
-  dagreGraph.setGraph({ rankdir: direction, nodesep: 100, ranksep: 150 });
-
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
-  });
-
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
-  });
-
-  dagre.layout(dagreGraph);
-
-  const layoutedNodes = nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    return {
-      ...node,
-      position: {
-        x: nodeWithPosition.x - nodeWidth / 2,
-        y: nodeWithPosition.y - nodeHeight / 2,
-      },
-    };
-  });
-
-  return { nodes: layoutedNodes, edges };
-}
 
 export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) {
   const {
@@ -83,6 +47,10 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
+  const [newBasicInfoKey, setNewBasicInfoKey] = useState('');
+  const [newBasicInfoValue, setNewBasicInfoValue] = useState('');
+  const [newPersonality, setNewPersonality] = useState('');
+  const [newAbility, setNewAbility] = useState('');
   const charactersRef = useRef(characters);
 
   useEffect(() => {
@@ -94,28 +62,25 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
     const nodes: Node[] = characters.map((char) => ({
       id: char.id,
       type: 'characterNode',
-      position: { x: 0, y: 0 }, // 将由 dagre 计算
+      position: { x: 0, y: 0 },
       data: char,
     }));
 
-    // 过滤有效的边
     const validEdges: Edge[] = relations
       .filter((rel) => {
-        const sourceId = rel.sourceId || rel.source_id;
-        const targetId = rel.targetId || rel.target_id;
         return (
-          sourceId &&
-          targetId &&
-          characters.find((c) => c.id === sourceId) &&
-          characters.find((c) => c.id === targetId) &&
-          sourceId !== targetId
+          rel.sourceId &&
+          rel.targetId &&
+          characters.find((c) => c.id === rel.sourceId) &&
+          characters.find((c) => c.id === rel.targetId) &&
+          rel.sourceId !== rel.targetId
         );
       })
       .map((rel) => ({
         id: rel.id,
-        source: rel.sourceId || rel.source_id || '',
-        target: rel.targetId || rel.target_id || '',
-        label: rel.relationType || rel.relation_type || '关联',
+        source: rel.sourceId,
+        target: rel.targetId,
+        label: rel.relationType || '关联',
         style: { stroke: '#6366f1', strokeWidth: 2 },
         labelStyle: { fill: '#6366f1', fontWeight: 500, fontSize: 11 },
         labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
@@ -123,11 +88,10 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
         markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' },
       }));
 
-    // 应用 dagre 布局
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
       nodes,
       validEdges,
-      'LR' // 从左到右布局
+      { direction: 'LR' }
     );
 
     return { initialNodes: layoutedNodes, initialEdges: layoutedEdges };
@@ -136,7 +100,6 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // 当数据变化时更新节点和边
   useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
@@ -169,10 +132,73 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
     (id: string) => {
       if (confirm('确定要删除这个人物吗？')) {
         deleteCharacter(id);
+        setSelectedCharacter(null);
       }
     },
-    [deleteCharacter]
+    [deleteCharacter, setSelectedCharacter]
   );
+
+  // 编辑基本信息
+  const handleBasicInfoChange = useCallback((key: string, value: string) => {
+    if (!editingCharacter) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      basicInfo: { ...editingCharacter.basicInfo, [key]: value }
+    });
+  }, [editingCharacter]);
+
+  const handleAddBasicInfo = useCallback(() => {
+    if (!editingCharacter || !newBasicInfoKey.trim()) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      basicInfo: { ...editingCharacter.basicInfo, [newBasicInfoKey.trim()]: newBasicInfoValue.trim() }
+    });
+    setNewBasicInfoKey('');
+    setNewBasicInfoValue('');
+  }, [editingCharacter, newBasicInfoKey, newBasicInfoValue]);
+
+  const handleRemoveBasicInfo = useCallback((key: string) => {
+    if (!editingCharacter) return;
+    const newBasicInfo = { ...editingCharacter.basicInfo };
+    delete newBasicInfo[key];
+    setEditingCharacter({ ...editingCharacter, basicInfo: newBasicInfo });
+  }, [editingCharacter]);
+
+  // 编辑性格
+  const handleAddPersonality = useCallback(() => {
+    if (!editingCharacter || !newPersonality.trim()) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      personality: [...editingCharacter.personality, newPersonality.trim()]
+    });
+    setNewPersonality('');
+  }, [editingCharacter, newPersonality]);
+
+  const handleRemovePersonality = useCallback((index: number) => {
+    if (!editingCharacter) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      personality: editingCharacter.personality.filter((_, i) => i !== index)
+    });
+  }, [editingCharacter]);
+
+  // 编辑能力
+  const handleAddAbility = useCallback(() => {
+    if (!editingCharacter || !newAbility.trim()) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      abilities: [...editingCharacter.abilities, newAbility.trim()]
+    });
+    setNewAbility('');
+  }, [editingCharacter, newAbility]);
+
+  const handleRemoveAbility = useCallback((index: number) => {
+    if (!editingCharacter) return;
+    setEditingCharacter({
+      ...editingCharacter,
+      abilities: editingCharacter.abilities.filter((_, i) => i !== index)
+    });
+  }, [editingCharacter]);
 
   return (
     <div className="h-full flex gap-4">
@@ -235,7 +261,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
               <div>
                 <h4 className="text-sm font-medium mb-1">基本信息</h4>
                 <div className="space-y-1">
-                  {Object.entries(selectedCharacter.basicInfo || selectedCharacter.basic_info || {}).map(
+                  {Object.entries(selectedCharacter.basicInfo || {}).map(
                     ([key, value]) => (
                       <div key={key} className="flex justify-between text-sm">
                         <span className="text-muted-foreground">{key}</span>
@@ -250,9 +276,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
                 <h4 className="text-sm font-medium mb-1">性格特点</h4>
                 <div className="flex flex-wrap gap-1">
                   {(selectedCharacter.personality || []).map((p, i) => (
-                    <Badge key={i} variant="secondary">
-                      {p}
-                    </Badge>
+                    <Badge key={i} variant="secondary">{p}</Badge>
                   ))}
                 </div>
               </div>
@@ -261,9 +285,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
                 <h4 className="text-sm font-medium mb-1">能力</h4>
                 <div className="flex flex-wrap gap-1">
                   {(selectedCharacter.abilities || []).map((a, i) => (
-                    <Badge key={i} variant="outline">
-                      {a}
-                    </Badge>
+                    <Badge key={i} variant="outline">{a}</Badge>
                   ))}
                 </div>
               </div>
@@ -271,9 +293,14 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
               <div>
                 <h4 className="text-sm font-medium mb-1">故事简介</h4>
                 <p className="text-sm text-muted-foreground">
-                  {selectedCharacter.storySummary ||
-                    (selectedCharacter as Character & { story_summary?: string }).story_summary ||
-                    '暂无'}
+                  {selectedCharacter.storySummary || '暂无'}
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium mb-1">首次登场</h4>
+                <p className="text-sm text-muted-foreground">
+                  {selectedCharacter.firstAppear || '暂无'}
                 </p>
               </div>
 
@@ -296,35 +323,167 @@ export function CharacterGraph({ onAnalyze, isAnalyzing }: CharacterGraphProps) 
 
       {/* 编辑对话框 */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>编辑人物信息</DialogTitle>
           </DialogHeader>
           {editingCharacter && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">姓名</label>
-                <Input
-                  value={editingCharacter.name}
-                  onChange={(e) => setEditingCharacter({ ...editingCharacter, name: e.target.value })}
-                />
+            <ScrollArea className="max-h-[60vh] pr-4">
+              <div className="space-y-4">
+                {/* 姓名 */}
+                <div>
+                  <label className="text-sm font-medium">姓名</label>
+                  <Input
+                    value={editingCharacter.name}
+                    onChange={(e) => setEditingCharacter({ ...editingCharacter, name: e.target.value })}
+                  />
+                </div>
+
+                {/* 别名 */}
+                <div>
+                  <label className="text-sm font-medium">别名</label>
+                  <Input
+                    value={editingCharacter.aliases?.join(', ') || ''}
+                    onChange={(e) => setEditingCharacter({
+                      ...editingCharacter,
+                      aliases: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                    })}
+                    placeholder="用逗号分隔多个别名"
+                  />
+                </div>
+
+                {/* 基本信息 */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">基本信息</label>
+                  <div className="space-y-2">
+                    {Object.entries(editingCharacter.basicInfo || {}).map(([key, value]) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <Input
+                          value={key}
+                          disabled
+                          className="w-24 bg-muted"
+                        />
+                        <Input
+                          value={String(value)}
+                          onChange={(e) => handleBasicInfoChange(key, e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => handleRemoveBasicInfo(key)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={newBasicInfoKey}
+                        onChange={(e) => setNewBasicInfoKey(e.target.value)}
+                        placeholder="属性名"
+                        className="w-24"
+                      />
+                      <Input
+                        value={newBasicInfoValue}
+                        onChange={(e) => setNewBasicInfoValue(e.target.value)}
+                        placeholder="属性值"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={handleAddBasicInfo}
+                        disabled={!newBasicInfoKey.trim()}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 性格特点 */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">性格特点</label>
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {editingCharacter.personality?.map((p, i) => (
+                      <Badge key={i} variant="secondary" className="flex items-center gap-1">
+                        {p}
+                        <X
+                          className="h-3 w-3 cursor-pointer"
+                          onClick={() => handleRemovePersonality(i)}
+                        />
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newPersonality}
+                      onChange={(e) => setNewPersonality(e.target.value)}
+                      placeholder="添加性格特点"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddPersonality()}
+                    />
+                    <Button variant="outline" size="sm" onClick={handleAddPersonality} disabled={!newPersonality.trim()}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 能力 */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">能力</label>
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {editingCharacter.abilities?.map((a, i) => (
+                      <Badge key={i} variant="outline" className="flex items-center gap-1">
+                        {a}
+                        <X
+                          className="h-3 w-3 cursor-pointer"
+                          onClick={() => handleRemoveAbility(i)}
+                        />
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newAbility}
+                      onChange={(e) => setNewAbility(e.target.value)}
+                      placeholder="添加能力"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddAbility()}
+                    />
+                    <Button variant="outline" size="sm" onClick={handleAddAbility} disabled={!newAbility.trim()}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 故事简介 */}
+                <div>
+                  <label className="text-sm font-medium">故事简介</label>
+                  <Textarea
+                    value={editingCharacter.storySummary || ''}
+                    onChange={(e) => setEditingCharacter({ ...editingCharacter, storySummary: e.target.value })}
+                    rows={3}
+                  />
+                </div>
+
+                {/* 首次登场 */}
+                <div>
+                  <label className="text-sm font-medium">首次登场</label>
+                  <Input
+                    value={editingCharacter.firstAppear || ''}
+                    onChange={(e) => setEditingCharacter({ ...editingCharacter, firstAppear: e.target.value })}
+                    placeholder="例如：第1章"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium">故事简介</label>
-                <Textarea
-                  value={editingCharacter.storySummary || ''}
-                  onChange={(e) => setEditingCharacter({ ...editingCharacter, storySummary: e.target.value })}
-                  rows={4}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-                  取消
-                </Button>
-                <Button onClick={handleSaveEdit}>保存</Button>
-              </div>
-            </div>
+            </ScrollArea>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveEdit}>保存</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

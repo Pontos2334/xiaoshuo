@@ -60,6 +60,10 @@ class CharacterChatEngine:
     管理用户与小说人物的对话交互
     """
 
+    # 会话管理配置
+    MAX_SESSIONS = 100  # 最大会话数
+    SESSION_TIMEOUT_HOURS = 24  # 会话超时时间（小时）
+
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
         self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
         self.base_url = base_url or os.getenv('ANTHROPIC_BASE_URL')
@@ -81,6 +85,67 @@ class CharacterChatEngine:
         # 档案缓存
         self.profiles: Dict[str, CharacterProfile] = {}
 
+    def _cleanup_expired_sessions(self) -> int:
+        """
+        清理过期会话
+
+        Returns:
+            清理的会话数量
+        """
+        now = datetime.now()
+        timeout_seconds = self.SESSION_TIMEOUT_HOURS * 3600
+
+        expired_session_ids = [
+            sid for sid, session in self.sessions.items()
+            if (now - session.last_active).total_seconds() > timeout_seconds
+        ]
+
+        for sid in expired_session_ids:
+            del self.sessions[sid]
+            # 同时清理对应的档案缓存（如果没有其他会话使用）
+            profile_id = None
+            for pid, profile in self.profiles.items():
+                if any(s.profile.character_id == pid for s in self.sessions.values()):
+                    continue
+                else:
+                    profile_id = pid
+                    break
+            if profile_id and profile_id in self.profiles:
+                del self.profiles[profile_id]
+
+        if expired_session_ids:
+            logger.info(f"清理了 {len(expired_session_ids)} 个过期会话")
+
+        return len(expired_session_ids)
+
+    def _cleanup_oldest_sessions(self, count: int) -> int:
+        """
+        清理最旧的会话
+
+        Args:
+            count: 要清理的数量
+
+        Returns:
+            实际清理的数量
+        """
+        if not self.sessions:
+            return 0
+
+        # 按最后活跃时间排序
+        sorted_sessions = sorted(
+            self.sessions.items(),
+            key=lambda x: x[1].last_active
+        )
+
+        cleaned = 0
+        for sid, _ in sorted_sessions[:count]:
+            if sid in self.sessions:
+                del self.sessions[sid]
+                cleaned += 1
+
+        logger.info(f"清理了 {cleaned} 个最旧会话")
+        return cleaned
+
     def create_session(
         self,
         character_id: str,
@@ -101,6 +166,14 @@ class CharacterChatEngine:
             对话会话
         """
         import uuid
+
+        # 检查并清理过期会话
+        self._cleanup_expired_sessions()
+
+        # 如果会话数仍然超过限制，清理最旧的
+        if len(self.sessions) >= self.MAX_SESSIONS:
+            excess = len(self.sessions) - self.MAX_SESSIONS + 1
+            self._cleanup_oldest_sessions(excess)
 
         session_id = str(uuid.uuid4())
 

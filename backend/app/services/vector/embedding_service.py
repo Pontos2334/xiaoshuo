@@ -12,6 +12,26 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+# 重试装饰器
+def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 10.0):
+    """简单的重试装饰器，避免引入额外依赖"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            import time
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        logger.warning(f"Embedding 调用失败 (尝试 {attempt + 1}/{max_retries})，{delay}秒后重试: {e}")
+                        time.sleep(delay)
+            raise last_exception
+        return wrapper
+    return decorator
+
 
 class EmbeddingService:
     """
@@ -19,6 +39,11 @@ class EmbeddingService:
 
     支持云端 API 和本地模型两种模式
     """
+
+    # 重试配置
+    MAX_RETRIES = 3
+    RETRY_BASE_DELAY = 1.0
+    RETRY_MAX_DELAY = 10.0
 
     def __init__(
         self,
@@ -106,25 +131,19 @@ class EmbeddingService:
             return embedding.tolist()
         except Exception as e:
             logger.error(f"本地模型生成嵌入失败: {e}")
-            return [0.0] * self.vector_size
+            raise  # 本地模型失败应该抛出异常，不静默返回
 
+    @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=10.0)
     def _embed_remote(self, text: str) -> List[float]:
-        """使用云端 API 生成嵌入"""
+        """使用云端 API 生成嵌入（带重试）"""
         if not self.client:
-            logger.warning("API 客户端未初始化，返回空向量")
-            return [0.0] * 1024
+            raise RuntimeError("API 客户端未初始化")
 
-        try:
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"云端 API 生成嵌入失败: {e}")
-            # 根据模型返回对应维度的零向量
-            dim = 1024 if "embedding-v3" in self.model or "embedding-v" in self.model else 1536
-            return [0.0] * dim
+        response = self.client.embeddings.create(
+            model=self.model,
+            input=text
+        )
+        return response.data[0].embedding
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
@@ -148,23 +167,19 @@ class EmbeddingService:
             return embeddings.tolist()
         except Exception as e:
             logger.error(f"本地模型批量生成嵌入失败: {e}")
-            return [[0.0] * self.vector_size for _ in texts]
+            raise
 
+    @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=10.0)
     def _embed_batch_remote(self, texts: List[str]) -> List[List[float]]:
-        """使用云端 API 批量生成嵌入"""
+        """使用云端 API 批量生成嵌入（带重试）"""
         if not self.client:
-            return [[0.0] * 1024 for _ in texts]
+            raise RuntimeError("API 客户端未初始化")
 
-        try:
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=texts
-            )
-            return [item.embedding for item in response.data]
-        except Exception as e:
-            logger.error(f"云端 API 批量生成嵌入失败: {e}")
-            dim = 1024 if "embedding-v3" in self.model or "embedding-v" in self.model else 1536
-            return [[0.0] * dim for _ in texts]
+        response = self.client.embeddings.create(
+            model=self.model,
+            input=texts
+        )
+        return [item.embedding for item in response.data]
 
     def get_vector_size(self) -> int:
         """获取向量维度"""
@@ -181,3 +196,25 @@ class EmbeddingService:
                 return 1536
             else:
                 return 1536
+
+    def health_check(self) -> dict:
+        """
+        健康检查
+
+        Returns:
+            包含状态信息的字典
+        """
+        try:
+            test_embedding = self.embed("test")
+            return {
+                "status": "healthy",
+                "mode": "local" if self.use_local else "remote",
+                "vector_size": len(test_embedding),
+                "model": self.local_model_path if self.use_local else self.model
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "mode": "local" if self.use_local else "remote"
+            }

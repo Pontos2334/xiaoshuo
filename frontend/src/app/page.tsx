@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
@@ -20,25 +20,35 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoadingData, setIsLoadingData] = useState(false);
 
-  // 当选择小说时，从后端加载已保存的数据
+  // 当选择小说时，从后端加载已保存的数据 - 使用 AbortController 防止竞态条件
   useEffect(() => {
-    if (!currentNovel) {
-      // 清空数据
+    // 清空数据的函数
+    const clearData = () => {
       setCharacters([]);
       setRelations([]);
       setPlotNodes([]);
       setPlotConnections([]);
+    };
+
+    if (!currentNovel?.id) {
+      clearData();
       return;
     }
+
+    const abortController = new AbortController();
+    const { signal } = abortController;
 
     const loadSavedData = async () => {
       setIsLoadingData(true);
       try {
         // 并行加载人物和情节数据
         const [charRes, plotRes] = await Promise.all([
-          fetch(`${API_URL}/characters?novel_id=${currentNovel.id}`),
-          fetch(`${API_URL}/plots?novel_id=${currentNovel.id}`),
+          fetch(`${API_URL}/characters?novel_id=${currentNovel.id}`, { signal }),
+          fetch(`${API_URL}/plots?novel_id=${currentNovel.id}`, { signal }),
         ]);
+
+        // 检查是否已取消
+        if (signal.aborted) return;
 
         if (charRes.ok) {
           const charData = await charRes.json();
@@ -51,27 +61,39 @@ export default function Home() {
         }
 
         // 加载关系数据
-        const relRes = await fetch(`${API_URL}/characters/relations?novel_id=${currentNovel.id}`);
+        const relRes = await fetch(`${API_URL}/characters/relations?novel_id=${currentNovel.id}`, { signal });
+        if (signal.aborted) return;
         if (relRes.ok) {
           const relData = await relRes.json();
           setRelations(relData || []);
         }
 
         // 加载情节连接
-        const connRes = await fetch(`${API_URL}/plots/connections?novel_id=${currentNovel.id}`);
+        const connRes = await fetch(`${API_URL}/plots/connections?novel_id=${currentNovel.id}`, { signal });
+        if (signal.aborted) return;
         if (connRes.ok) {
           const connData = await connRes.json();
           setPlotConnections(connData || []);
         }
       } catch (error) {
+        // 忽略取消错误
+        if ((error as Error).name === 'AbortError') return;
         console.error('加载保存的数据失败:', error);
+        toast.error('加载数据失败');
       } finally {
-        setIsLoadingData(false);
+        if (!signal.aborted) {
+          setIsLoadingData(false);
+        }
       }
     };
 
     loadSavedData();
-  }, [currentNovel, setCharacters, setRelations, setPlotNodes, setPlotConnections]);
+
+    // 清理函数：取消未完成的请求
+    return () => {
+      abortController.abort();
+    };
+  }, [currentNovel?.id, setCharacters, setRelations, setPlotNodes, setPlotConnections]);
 
   // AI分析人物
   const handleAnalyzeCharacters = async () => {

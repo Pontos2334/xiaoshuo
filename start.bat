@@ -1,32 +1,30 @@
 @echo off
+chcp 65001 >nul 2>&1
 echo ========================================
-echo   小说创作助手 - 启动脚本
+echo   Novel Assistant - Start Script
 echo ========================================
 echo.
 
-:: 启动后端
-echo [1/2] 启动后端服务...
+echo [1/2] Starting backend...
 cd backend
-start cmd /k "title 小说创作助手-后端 && python -m uvicorn app.main:app --reload --port 8000"
+start cmd /k "title Novel-Assistant-Backend && python -m uvicorn app.main:app --reload --port 8002"
 cd ..
 
-:: 等待后端启动
-timeout /t 3 /nobreak > nul
+timeout /t 3 /nobreak >nul
 
-:: 启动前端
-echo [2/2] 启动前端服务...
+echo [2/2] Starting frontend...
 cd frontend
-start cmd /k "title 小说创作助手-前端 && npm run dev"
+start cmd /k "title Novel-Assistant-Frontend && npm run dev"
 cd ..
 
 echo.
 echo ========================================
-echo   服务已启动！
+echo   Services Started
 echo ========================================
 echo.
-echo   前端: http://localhost:3000
-echo   后端: http://localhost:8000
-echo   API文档: http://localhost:8000/docs
+echo   Frontend: http://localhost:3000
+echo   Backend:  http://localhost:8002
+echo   API Docs: http://localhost:8002/docs
 echo.
-echo   按任意键退出...
-pause > nul
+echo   Press any key to exit...
+pause >nul

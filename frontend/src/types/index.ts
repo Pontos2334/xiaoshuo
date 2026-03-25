@@ -35,6 +35,7 @@ export interface PlotNode {
   importance: number; // 1-10
   contentRef: string;
   createdAt: string;
+  updatedAt: string;
   [key: string]: unknown; // 添加索引签名以兼容React Flow
 }
 
@@ -45,10 +46,6 @@ export interface PlotConnection {
   targetId: string;
   connectionType: 'cause' | 'parallel' | 'foreshadow' | 'flashback' | 'next';
   description: string;
-  // 后端 snake_case 兼容
-  source_id?: string;
-  target_id?: string;
-  connection_type?: string;
 }
 
 // 小说类型
@@ -57,15 +54,11 @@ export interface Novel {
   name: string;
   path: string;
   contentPath: string;
-  content_path?: string; // 后端 snake_case 兼容
   outlinePath?: string;
-  outline_path?: string; // 后端 snake_case 兼容
   chapterCount: number;
-  chapter_count?: number; // 后端 snake_case 兼容
   wordCount: number;
-  word_count?: number; // 后端 snake_case 兼容
   createdAt: string;
-  created_at?: string; // 后端 snake_case 兼容
+  updatedAt: string;
 }
 
 // 灵感类型

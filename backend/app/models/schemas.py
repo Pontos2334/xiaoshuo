@@ -1,11 +1,26 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
 
 
+def to_camel(string: str) -> str:
+    """将 snake_case 转换为 camelCase"""
+    components = string.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
+class CamelCaseModel(BaseModel):
+    """自动将字段名转换为 camelCase 的基类"""
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+        alias_generator = to_camel
+
+
 # ========== 小说相关 ==========
-class NovelBase(BaseModel):
+class NovelBase(CamelCaseModel):
     name: str
     path: str
     content_path: Optional[str] = None
@@ -23,12 +38,9 @@ class NovelResponse(NovelBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 # ========== 人物相关 ==========
-class CharacterBase(BaseModel):
+class CharacterBase(CamelCaseModel):
     name: str
     aliases: List[str] = []
     basic_info: Optional[Dict[str, Any] | str] = None
@@ -42,7 +54,7 @@ class CharacterCreate(CharacterBase):
     novel_id: str
 
 
-class CharacterUpdate(BaseModel):
+class CharacterUpdate(CamelCaseModel):
     name: Optional[str] = None
     aliases: Optional[List[str]] = None
     basic_info: Optional[Dict[str, Any]] = None
@@ -57,9 +69,6 @@ class CharacterResponse(CharacterBase):
     novel_id: str
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
     @field_validator('basic_info', mode='before')
     @classmethod
@@ -85,7 +94,7 @@ class CharacterResponse(CharacterBase):
 
 
 # ========== 人物关系相关 ==========
-class CharacterRelationBase(BaseModel):
+class CharacterRelationBase(CamelCaseModel):
     source_id: str
     target_id: str
     relation_type: str
@@ -97,7 +106,7 @@ class CharacterRelationCreate(CharacterRelationBase):
     novel_id: str
 
 
-class CharacterRelationUpdate(BaseModel):
+class CharacterRelationUpdate(CamelCaseModel):
     relation_type: Optional[str] = None
     description: Optional[str] = None
     strength: Optional[int] = None
@@ -107,12 +116,9 @@ class CharacterRelationResponse(CharacterRelationBase):
     id: str
     novel_id: str
 
-    class Config:
-        from_attributes = True
-
 
 # ========== 情节相关 ==========
-class PlotNodeBase(BaseModel):
+class PlotNodeBase(CamelCaseModel):
     title: str
     chapter: Optional[str] = None
     summary: Optional[str] = None
@@ -126,7 +132,7 @@ class PlotNodeCreate(PlotNodeBase):
     novel_id: str
 
 
-class PlotNodeUpdate(BaseModel):
+class PlotNodeUpdate(CamelCaseModel):
     title: Optional[str] = None
     chapter: Optional[str] = None
     summary: Optional[str] = None
@@ -142,12 +148,9 @@ class PlotNodeResponse(PlotNodeBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 # ========== 情节连接相关 ==========
-class PlotConnectionBase(BaseModel):
+class PlotConnectionBase(CamelCaseModel):
     source_id: str
     target_id: str
     connection_type: str  # cause, parallel, foreshadow, flashback, next
@@ -158,7 +161,7 @@ class PlotConnectionCreate(PlotConnectionBase):
     novel_id: str
 
 
-class PlotConnectionUpdate(BaseModel):
+class PlotConnectionUpdate(CamelCaseModel):
     connection_type: Optional[str] = None
     description: Optional[str] = None
 
@@ -167,12 +170,9 @@ class PlotConnectionResponse(PlotConnectionBase):
     id: str
     novel_id: str
 
-    class Config:
-        from_attributes = True
-
 
 # ========== 灵感相关 ==========
-class InspirationRequest(BaseModel):
+class InspirationRequest(CamelCaseModel):
     novel_id: Optional[str] = None
     type: str  # scene, plot, continue, character, emotion
     target_id: Optional[str] = None  # 兼容单个ID
@@ -180,19 +180,16 @@ class InspirationRequest(BaseModel):
     context: Optional[str] = None
 
 
-class InspirationResponse(BaseModel):
+class InspirationResponse(CamelCaseModel):
     id: str
     type: str
     target_id: Optional[str]
     content: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 # ========== 通用响应 ==========
-class ApiResponse(BaseModel):
+class ApiResponse(CamelCaseModel):
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
