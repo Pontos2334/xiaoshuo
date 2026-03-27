@@ -8,18 +8,23 @@ AI小说创作助手 - 通过Web界面提供人物关系图、情节关联图、
 
 ## 常用命令
 
-### 启动开发环境
+### 后端 (在 backend/ 目录)
 ```bash
-# 后端 (在 backend/ 目录)
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+pip install -r requirements.txt          # 安装依赖
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload  # 启动开发服务
+```
 
-# 前端 (在 frontend/ 目录)
-npm install
-npm run dev
+### 前端 (在 frontend/ 目录)
+```bash
+npm install                              # 安装依赖
+npm run dev                              # 启动开发服务
+npm run build                            # 构建生产版本
+npm run lint                             # 运行 ESLint 检查
+```
 
-# Docker Compose (包含 Qdrant + Neo4j)
-docker-compose up -d
+### Docker Compose
+```bash
+docker-compose up -d                     # 启动 Qdrant + Neo4j + 前后端服务
 ```
 
 ### 访问地址
@@ -32,7 +37,7 @@ docker-compose up -d
 ## 架构
 
 ### 前后端分离
-- **前端**: Next.js 16 + React 19 + TypeScript，端口 3000
+- **前端**: Next.js 16.2 + React 19.2 + TypeScript，端口 3000
 - **后端**: FastAPI + SQLite + Neo4j + Qdrant，端口 8002
 
 ### 前端架构
@@ -48,7 +53,8 @@ backend/app/
 ├── main.py              # FastAPI 入口，注册所有路由
 ├── core/
 │   ├── config.py        # Pydantic Settings 配置管理
-│   └── exceptions.py    # 全局异常处理
+│   ├── exceptions.py    # 全局异常处理
+│   └── logging_config.py # 日志配置
 ├── api/                 # API 路由层
 │   ├── files.py         # 文件/小说管理
 │   ├── characters.py    # 人物/关系管理
@@ -57,28 +63,31 @@ backend/app/
 │   ├── search.py        # 向量搜索
 │   ├── graph.py         # 知识图谱
 │   ├── chat.py          # 人物对话
-│   └── assistant.py     # 智能助手
+│   ├── assistant.py     # 智能助手
+│   └── analysis.py      # 长文本分析任务
 ├── services/            # 业务逻辑层
 │   ├── character_analyzer.py
 │   ├── plot_analyzer.py
 │   ├── inspiration_gen.py
+│   ├── text_chunker.py          # 文本分块
+│   ├── map_reduce_analyzer.py   # Map-Reduce 分析
+│   ├── analyzers/               # 分块分析器
 │   ├── vector/          # 向量搜索服务
 │   │   ├── embedding_service.py
 │   │   └── qdrant_service.py
 │   ├── graph_rag/       # GraphRAG 知识图谱
-│   │   ├── novel_ontology_generator.py
-│   │   ├── novel_entity_extractor.py
-│   │   └── novel_graph_builder.py
 │   ├── character_chat/  # 人物对话系统
-│   │   ├── character_profile_generator.py
-│   │   └── character_chat_engine.py
 │   └── novel_assistant/ # 智能助手
-│       ├── plot_predictor.py
-│       └── writing_advisor.py
 ├── agent/client.py      # AI 客户端（Anthropic 兼容 API）
 ├── db/neo4j_client.py   # Neo4j 图数据库客户端
 └── models/              # SQLAlchemy 数据模型
 ```
+
+### 关键数据流
+1. **小说导入**: 文件夹扫描 → 存储到 `backend/data/novels/` → SQLite 记录元信息
+2. **AI分析**: 读取小说文本 → ClaudeAgentClient 调用 LLM → 解析 JSON 响应 → 存入 SQLite/Neo4j
+3. **图谱可视化**: 前端调用 API → SQLite 查询 → 转换为 G6/ReactFlow 数据格式
+4. **向量搜索**: 文本 → embedding_service 编码 → Qdrant 存储/检索
 
 ### 环境配置
 后端通过 `backend/.env` 配置：
@@ -108,6 +117,7 @@ GRAPH_RAG_MAX_GLEANINGS=1
 
 - **Next.js 16**: 与训练数据中的版本有 breaking changes，开发前参考 `frontend/node_modules/next/dist/docs/`
 - **React 19**: 使用 React 19.2.4，注意与旧版 API 的差异
-- **Mock 数据**: 后端无 API Key 时会返回 mock 数据，便于前端开发测试
+- **Mock 数据**: 后端无 API Key 时会返回 mock 数据（见 `agent/client.py:_mock_response`），便于前端开发测试
 - **API 超时**: 前端设置 60 秒超时，因为 AI 分析可能需要较长时间
+- **LLM 日志**: 每次调用记录到 `backend/logs/llm/`，便于调试
 - **参考项目**: `MiroFish/` 目录包含向量搜索和实体抽取的参考实现

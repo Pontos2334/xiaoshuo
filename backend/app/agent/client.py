@@ -1,10 +1,15 @@
 import os
+import logging
+import json
 from typing import Optional
+from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
 
 # 加载环境变量
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeAgentClient:
@@ -16,19 +21,51 @@ class ClaudeAgentClient:
         self.model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
         self.max_tokens = int(os.getenv("MAX_TOKENS", "4096"))
 
+        # 日志保存目录
+        self.log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "llm")
+        os.makedirs(self.log_dir, exist_ok=True)
+
         if self.api_key:
             self.client = anthropic.Anthropic(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
+            logger.info(f"LLM 客户端初始化完成: model={self.model}, base_url={self.base_url}")
         else:
             self.client = None
-            print("警告: 未配置ANTHROPIC_API_KEY，将使用模拟响应")
+            logger.warning("未配置ANTHROPIC_API_KEY，将使用模拟响应")
+
+    def _save_llm_log(self, prompt: str, response: str, error: Optional[str] = None, metadata: dict = None):
+        """保存 LLM 调用日志"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(self.log_dir, f"llm_call_{timestamp}.json")
+
+            log_data = {
+                "timestamp": datetime.now().isoformat(),
+                "model": self.model,
+                "base_url": self.base_url,
+                "prompt_preview": prompt[:500] + "..." if len(prompt) > 500 else prompt,
+                "prompt_length": len(prompt),
+                "response_preview": response[:500] + "..." if response and len(response) > 500 else response,
+                "response_length": len(response) if response else 0,
+                "error": error,
+                "metadata": metadata or {}
+            }
+
+            with open(log_file, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, ensure_ascii=False, indent=2)
+
+            logger.debug(f"LLM 调用日志已保存: {log_file}")
+        except Exception as e:
+            logger.warning(f"保存 LLM 日志失败: {e}")
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """生成响应"""
         if self.client:
             try:
+                logger.info(f"调用 LLM: model={self.model}, prompt_length={len(prompt)}")
+
                 message = self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
@@ -37,9 +74,48 @@ class ClaudeAgentClient:
                         {"role": "user", "content": prompt}
                     ]
                 )
-                return message.content[0].text
+
+                response_text = message.content[0].text
+
+                # 记录成功调用
+                logger.info(f"LLM 响应成功: response_length={len(response_text)}")
+
+                # 保存日志
+                self._save_llm_log(
+                    prompt=prompt,
+                    response=response_text,
+                    metadata={
+                        "usage": {
+                            "input_tokens": getattr(message.usage, 'input_tokens', None),
+                            "output_tokens": getattr(message.usage, 'output_tokens', None)
+                        } if hasattr(message, 'usage') else None
+                    }
+                )
+
+                return response_text
+
+            except anthropic.APIError as e:
+                error_msg = f"Anthropic API 错误: {e}"
+                logger.error(error_msg)
+                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "APIError"})
+                return self._mock_response(prompt)
+
+            except anthropic.APIConnectionError as e:
+                error_msg = f"API 连接错误: {e}"
+                logger.error(error_msg)
+                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "APIConnectionError"})
+                return self._mock_response(prompt)
+
+            except anthropic.RateLimitError as e:
+                error_msg = f"API 限流错误: {e}"
+                logger.error(error_msg)
+                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "RateLimitError"})
+                return self._mock_response(prompt)
+
             except Exception as e:
-                print(f"API调用错误: {e}")
+                error_msg = f"API 调用未知错误: {type(e).__name__}: {e}"
+                logger.error(error_msg)
+                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": type(e).__name__})
                 return self._mock_response(prompt)
         else:
             return self._mock_response(prompt)
@@ -48,6 +124,8 @@ class ClaudeAgentClient:
         """同步生成响应"""
         if self.client:
             try:
+                logger.info(f"调用 LLM (sync): model={self.model}, prompt_length={len(prompt)}")
+
                 message = self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
@@ -56,15 +134,25 @@ class ClaudeAgentClient:
                         {"role": "user", "content": prompt}
                     ]
                 )
-                return message.content[0].text
+
+                response_text = message.content[0].text
+                logger.info(f"LLM 响应成功 (sync): response_length={len(response_text)}")
+
+                self._save_llm_log(prompt=prompt, response=response_text)
+
+                return response_text
+
             except Exception as e:
-                print(f"API调用错误: {e}")
+                error_msg = f"API 调用错误: {type(e).__name__}: {e}"
+                logger.error(error_msg)
+                self._save_llm_log(prompt=prompt, response=None, error=error_msg)
                 return self._mock_response(prompt)
         else:
             return self._mock_response(prompt)
 
     def _mock_response(self, prompt: str) -> str:
         """模拟响应（用于测试或无API密钥时）"""
+        logger.info("使用模拟响应")
         if "人物" in prompt or "角色" in prompt:
             return '''```json
 [

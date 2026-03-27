@@ -1,24 +1,87 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Callable
 from app.agent.client import ClaudeAgentClient
 from app.core.json_utils import JSONParser
 
 logger = logging.getLogger(__name__)
 
 # 常量定义
-MAX_CONTENT_LENGTH = 20000
+MAX_CONTENT_LENGTH = 20000  # 短文本阈值
 MAX_OUTLINE_LENGTH = 8000
+
+# Map-Reduce 配置
+LONG_TEXT_THRESHOLD = 20000  # 触发 Map-Reduce 的字符阈值
+CHUNK_SIZE_PLOT = 4000       # 情节分析块大小
+MAX_CONCURRENT_TASKS = 2     # 最大并发任务数（情节分析较复杂）
 
 
 class PlotAnalyzer:
-    """情节分析服务"""
+    """情节分析服务 - 支持 Map-Reduce 长文本处理"""
 
-    def __init__(self):
+    def __init__(self, use_map_reduce: bool = True):
         self.agent = ClaudeAgentClient()
         self.json_parser = JSONParser()
+        self.use_map_reduce = use_map_reduce
 
-    async def analyze(self, content: str, outline: str = "") -> List[Dict[str, Any]]:
-        """分析小说内容，提取情节节点
+        # 初始化 Map-Reduce 组件
+        if use_map_reduce:
+            try:
+                from app.services.text_chunker import TextChunker, ChunkConfig, ChunkStrategy
+                from app.services.map_reduce_analyzer import MapReduceAnalyzer
+                from app.services.analyzers.plot_mapper import PlotMapper
+                from app.services.analyzers.plot_reducer import PlotReducer
+
+                self.chunker = TextChunker(ChunkConfig(
+                    max_chunk_size=CHUNK_SIZE_PLOT,
+                    strategy=ChunkStrategy.PARAGRAPH
+                ))
+                self.map_reduce = MapReduceAnalyzer(
+                    mapper=PlotMapper(),
+                    reducer=PlotReducer(),
+                    chunker=self.chunker,
+                    max_concurrent_tasks=MAX_CONCURRENT_TASKS
+                )
+            except ImportError as e:
+                logger.warning(f"Map-Reduce 组件导入失败，使用传统模式: {e}")
+                self.use_map_reduce = False
+
+    async def analyze(
+        self,
+        content: str,
+        outline: str = "",
+        progress_callback: Optional[Callable[[Any], None]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        分析小说内容，提取情节节点
+
+        自动选择策略：
+        - 短文本（<20000字符）：两阶段分析
+        - 长文本：使用 Map-Reduce
+
+        Args:
+            content: 小说内容
+            outline: 小说大纲
+            progress_callback: 进度回调函数（仅 Map-Reduce 模式）
+
+        Returns:
+            情节节点列表
+        """
+        if not content or not content.strip():
+            return []
+
+        content_length = len(content)
+
+        # 选择分析策略
+        if self.use_map_reduce and content_length >= LONG_TEXT_THRESHOLD:
+            logger.info(f"使用 Map-Reduce 模式分析情节 ({content_length} 字符)")
+            return await self._analyze_long(content, outline, progress_callback)
+        else:
+            logger.info(f"使用传统模式分析情节 ({content_length} 字符)")
+            return await self._analyze_short(content, outline)
+
+    async def _analyze_short(self, content: str, outline: str = "") -> List[Dict[str, Any]]:
+        """
+        短文本两阶段分析（原有逻辑）
 
         分两步进行：
         1. 先让大模型理解整体故事，总结剧情主线和关键转折
@@ -83,6 +146,36 @@ class PlotAnalyzer:
 
         logger.info(f"提取了 {len(plot_nodes)} 个情节节点")
         return plot_nodes
+
+    async def _analyze_long(
+        self,
+        content: str,
+        outline: str = "",
+        progress_callback: Optional[Callable[[Any], None]] = None
+    ) -> List[Dict[str, Any]]:
+        """长文本使用 Map-Reduce 分析"""
+        try:
+            context = {'outline': outline}
+            result = await self.map_reduce.analyze(
+                text=content,
+                context=context,
+                progress_callback=progress_callback
+            )
+
+            # 添加 source 标记
+            for plot in result.result:
+                plot['source'] = 'ai'
+
+            logger.info(
+                f"Map-Reduce 分析完成: {len(result.result)} 个情节, "
+                f"去重统计: {result.deduplication_stats}"
+            )
+
+            return result.result
+
+        except Exception as e:
+            logger.error(f"Map-Reduce 分析失败，回退到传统模式: {e}")
+            return await self._analyze_short(content, outline)
 
     async def analyze_connections(self, plot_nodes: List[Any]) -> List[Dict[str, Any]]:
         """分析情节之间的连接关系

@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     GRAPH_RAG_MAX_GLEANINGS: int = 1
     GRAPH_RAG_CHUNK_SIZE: int = 2000
 
+    # 长文本处理配置
+    LONG_TEXT_THRESHOLD: int = 15000      # 触发 Map-Reduce 的字符阈值
+    MAP_REDUCE_MAX_CONCURRENT: int = 3    # 最大并发任务数
+    CHUNK_SIZE_CHARACTER: int = 3000      # 人物分析块大小
+    CHUNK_SIZE_PLOT: int = 4000           # 情节分析块大小
+    CHUNK_OVERLAP_SIZE: int = 200         # 块重叠大小
+
     @field_validator("FRONTEND_URL", mode="before")
     @classmethod
     def validate_frontend_url(cls, v: str) -> str:

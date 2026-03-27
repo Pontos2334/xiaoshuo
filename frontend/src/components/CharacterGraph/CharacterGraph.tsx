@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +28,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCharacterStore } from '@/stores';
-import { Character } from '@/types';
-import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown } from 'lucide-react';
+import { Character, CharacterRelation } from '@/types';
+import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown, Users } from 'lucide-react';
 import { CharacterNode } from './CharacterNode';
 import { getLayoutedElements } from '@/lib/layoutUtils';
 import { AnalyzeMode } from '@/app/page';
@@ -52,6 +53,8 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
     setSelectedCharacter,
     updateCharacter,
     deleteCharacter,
+    updateRelation,
+    deleteRelation,
   } = useCharacterStore();
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -61,10 +64,20 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
   const [newPersonality, setNewPersonality] = useState('');
   const [newAbility, setNewAbility] = useState('');
   const charactersRef = useRef(characters);
+  const relationsRef = useRef(relations);
+
+  // 选中的关系
+  const [selectedRelation, setSelectedRelation] = useState<CharacterRelation | null>(null);
+  const [editRelationDialogOpen, setEditRelationDialogOpen] = useState(false);
+  const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null);
 
   useEffect(() => {
     charactersRef.current = characters;
   }, [characters]);
+
+  useEffect(() => {
+    relationsRef.current = relations;
+  }, [relations]);
 
   // 转换为 React Flow 格式并应用布局
   const { initialNodes, initialEdges } = useMemo(() => {
@@ -90,11 +103,16 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
         source: rel.sourceId,
         target: rel.targetId,
         label: rel.relationType || '关联',
-        style: { stroke: '#6366f1', strokeWidth: 2 },
-        labelStyle: { fill: '#6366f1', fontWeight: 500, fontSize: 11 },
+        style: {
+          stroke: selectedRelation?.id === rel.id ? '#f59e0b' : '#6366f1',
+          strokeWidth: selectedRelation?.id === rel.id ? 3 : 2,
+          cursor: 'pointer',
+        },
+        labelStyle: { fill: selectedRelation?.id === rel.id ? '#f59e0b' : '#6366f1', fontWeight: 500, fontSize: 11 },
         labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
         labelBgPadding: [4, 2] as [number, number],
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: selectedRelation?.id === rel.id ? '#f59e0b' : '#6366f1' },
+        data: rel, // 存储完整的关系数据
       }));
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
@@ -119,6 +137,18 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
       const character = charactersRef.current.find((c) => c.id === node.id);
       if (character) {
         setSelectedCharacter(character);
+        setSelectedRelation(null); // 清除选中的关系
+      }
+    },
+    [setSelectedCharacter]
+  );
+
+  const onEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: Edge) => {
+      const relation = relationsRef.current.find((r) => r.id === edge.id);
+      if (relation) {
+        setSelectedRelation(relation);
+        setSelectedCharacter(null); // 清除选中的人物
       }
     },
     [setSelectedCharacter]
@@ -209,6 +239,41 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
     });
   }, [editingCharacter]);
 
+  // 关系编辑处理
+  const handleEditRelation = useCallback((relation: CharacterRelation) => {
+    setEditingRelation({ ...relation });
+    setEditRelationDialogOpen(true);
+  }, []);
+
+  const handleSaveEditRelation = useCallback(() => {
+    if (editingRelation) {
+      updateRelation(editingRelation.id, editingRelation);
+      setEditRelationDialogOpen(false);
+      setEditingRelation(null);
+      setSelectedRelation(editingRelation);
+    }
+  }, [editingRelation, updateRelation]);
+
+  const handleDeleteRelation = useCallback(
+    (id: string) => {
+      if (confirm('确定要删除这个关系吗？')) {
+        deleteRelation(id);
+        setSelectedRelation(null);
+      }
+    },
+    [deleteRelation]
+  );
+
+  // 获取关系两端的人物名称
+  const getRelationCharacterNames = useCallback((relation: CharacterRelation) => {
+    const source = characters.find((c) => c.id === relation.sourceId);
+    const target = characters.find((c) => c.id === relation.targetId);
+    return {
+      sourceName: source?.name || '未知',
+      targetName: target?.name || '未知',
+    };
+  }, [characters]);
+
   return (
     <div className="h-full flex gap-4">
       {/* 图谱区域 */}
@@ -261,6 +326,7 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick}
+              onEdgeClick={onEdgeClick}
               nodeTypes={nodeTypes}
               fitView
               minZoom={0.3}
@@ -286,10 +352,25 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
         </CardContent>
       </Card>
 
-      {/* 人物详情面板 */}
+      {/* 详情面板 */}
       <Card className="w-80">
         <CardHeader>
-          <CardTitle>{selectedCharacter ? selectedCharacter.name : '选择人物'}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {selectedCharacter ? (
+              <>
+                <span>{selectedCharacter.name}</span>
+                <Badge variant="secondary">人物</Badge>
+              </>
+            ) : selectedRelation ? (
+              <>
+                <Users className="h-4 w-4" />
+                <span>关系详情</span>
+                <Badge variant="secondary">关系</Badge>
+              </>
+            ) : (
+              '选择人物或关系'
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {selectedCharacter ? (
@@ -351,8 +432,69 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
                 </Button>
               </div>
             </div>
+          ) : selectedRelation ? (
+            <div className="space-y-4">
+              {(() => {
+                const { sourceName, targetName } = getRelationCharacterNames(selectedRelation);
+                return (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-medium mb-1">关系人物</h4>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Badge variant="default">{sourceName}</Badge>
+                        <span className="text-muted-foreground">→</span>
+                        <Badge variant="default">{targetName}</Badge>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-1">关系类型</h4>
+                      <Badge variant="secondary" className="text-base">
+                        {selectedRelation.relationType || '关联'}
+                      </Badge>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-1">关系描述</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {selectedRelation.description || '暂无描述'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-1">关系强度</h4>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all"
+                            style={{ width: `${(selectedRelation.strength || 5) * 10}%` }}
+                          />
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {selectedRelation.strength || 5}/10
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-4">
+                      <Button variant="outline" size="sm" onClick={() => handleEditRelation(selectedRelation)}>
+                        <Edit2 className="h-4 w-4" />
+                        编辑
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleDeleteRelation(selectedRelation.id)}>
+                        <Trash2 className="h-4 w-4" />
+                        删除
+                      </Button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           ) : (
-            <div className="text-center text-muted-foreground py-8">点击图谱中的人物节点查看详情</div>
+            <div className="text-center text-muted-foreground py-8">
+              <p>点击图谱中的人物节点或关系连线查看详情</p>
+              <p className="text-xs mt-2">💡 提示：点击连线可以查看关系详情</p>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -519,6 +661,69 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>取消</Button>
             <Button onClick={handleSaveEdit}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 关系编辑对话框 */}
+      <Dialog open={editRelationDialogOpen} onOpenChange={setEditRelationDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑关系</DialogTitle>
+          </DialogHeader>
+          {editingRelation && (
+            <div className="space-y-4">
+              {/* 关系双方 */}
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                <Badge variant="default">{getRelationCharacterNames(editingRelation).sourceName}</Badge>
+                <span className="text-muted-foreground">→</span>
+                <Badge variant="default">{getRelationCharacterNames(editingRelation).targetName}</Badge>
+              </div>
+
+              {/* 关系类型 */}
+              <div>
+                <label className="text-sm font-medium">关系类型</label>
+                <Input
+                  value={editingRelation.relationType || ''}
+                  onChange={(e) => setEditingRelation({ ...editingRelation, relationType: e.target.value })}
+                  placeholder="例如：师徒、朋友、敌人"
+                />
+              </div>
+
+              {/* 关系描述 */}
+              <div>
+                <label className="text-sm font-medium">关系描述</label>
+                <Textarea
+                  value={editingRelation.description || ''}
+                  onChange={(e) => setEditingRelation({ ...editingRelation, description: e.target.value })}
+                  rows={3}
+                  placeholder="描述两人之间的关系..."
+                />
+              </div>
+
+              {/* 关系强度 */}
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  关系强度: {editingRelation.strength || 5}/10
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={editingRelation.strength || 5}
+                  onChange={(e) => setEditingRelation({ ...editingRelation, strength: parseInt(e.target.value) })}
+                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>弱</span>
+                  <span>强</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRelationDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveEditRelation}>保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

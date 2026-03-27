@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from app.agent.client import ClaudeAgentClient
 from app.core.json_utils import JSONParser
@@ -9,20 +9,80 @@ from app.services.chapter_splitter import chapter_splitter
 logger = logging.getLogger(__name__)
 
 # 常量定义
-MAX_CONTENT_LENGTH = 15000  # 增加到15000字符
+MAX_CONTENT_LENGTH = 15000  # 短文本阈值
 MAX_RELATION_CONTENT_LENGTH = 10000
 MAX_CHAPTER_CONTENT = 8000  # 单章最大内容
 
+# Map-Reduce 配置
+LONG_TEXT_THRESHOLD = 15000  # 触发 Map-Reduce 的字符阈值
+CHUNK_SIZE_CHARACTER = 3000  # 人物分析块大小
+MAX_CONCURRENT_TASKS = 3     # 最大并发任务数
+
 
 class CharacterAnalyzer:
-    """人物分析服务"""
+    """人物分析服务 - 支持 Map-Reduce 长文本处理"""
 
-    def __init__(self):
+    def __init__(self, use_map_reduce: bool = True):
         self.agent = ClaudeAgentClient()
         self.json_parser = JSONParser()
+        self.use_map_reduce = use_map_reduce
 
-    async def analyze(self, content: str) -> List[Dict[str, Any]]:
-        """全量分析小说内容，提取人物信息"""
+        # 初始化 Map-Reduce 组件
+        if use_map_reduce:
+            try:
+                from app.services.text_chunker import TextChunker, ChunkConfig, ChunkStrategy
+                from app.services.map_reduce_analyzer import MapReduceAnalyzer
+                from app.services.analyzers.character_mapper import CharacterMapper
+                from app.services.analyzers.character_reducer import CharacterReducer
+
+                self.chunker = TextChunker(ChunkConfig(
+                    max_chunk_size=CHUNK_SIZE_CHARACTER,
+                    strategy=ChunkStrategy.PARAGRAPH
+                ))
+                self.map_reduce = MapReduceAnalyzer(
+                    mapper=CharacterMapper(),
+                    reducer=CharacterReducer(),
+                    chunker=self.chunker,
+                    max_concurrent_tasks=MAX_CONCURRENT_TASKS
+                )
+            except ImportError as e:
+                logger.warning(f"Map-Reduce 组件导入失败，使用传统模式: {e}")
+                self.use_map_reduce = False
+
+    async def analyze(
+        self,
+        content: str,
+        progress_callback: Optional[Callable[[Any], None]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        全量分析小说内容，提取人物信息
+
+        自动选择策略：
+        - 短文本（<15000字符）：直接分析
+        - 长文本：使用 Map-Reduce
+
+        Args:
+            content: 小说内容
+            progress_callback: 进度回调函数（仅 Map-Reduce 模式）
+
+        Returns:
+            人物列表
+        """
+        if not content or not content.strip():
+            return []
+
+        content_length = len(content)
+
+        # 选择分析策略
+        if self.use_map_reduce and content_length >= LONG_TEXT_THRESHOLD:
+            logger.info(f"使用 Map-Reduce 模式分析 ({content_length} 字符)")
+            return await self._analyze_long(content, progress_callback)
+        else:
+            logger.info(f"使用传统模式分析 ({content_length} 字符)")
+            return await self._analyze_short(content)
+
+    async def _analyze_short(self, content: str) -> List[Dict[str, Any]]:
+        """短文本直接分析（原有逻辑）"""
         truncated_content = content[:MAX_CONTENT_LENGTH]
         prompt = f"""请分析以下小说内容，提取所有重要人物的信息。
 
@@ -47,21 +107,50 @@ class CharacterAnalyzer:
             logger.warning(f"人物分析返回空结果，原始响应: {response[:200]}...")
         return characters
 
+    async def _analyze_long(
+        self,
+        content: str,
+        progress_callback: Optional[Callable[[Any], None]] = None
+    ) -> List[Dict[str, Any]]:
+        """长文本使用 Map-Reduce 分析"""
+        try:
+            result = await self.map_reduce.analyze(
+                text=content,
+                progress_callback=progress_callback
+            )
+
+            # 添加 source 标记
+            for char in result.result:
+                char['source'] = 'ai'
+
+            logger.info(
+                f"Map-Reduce 分析完成: {len(result.result)} 个人物, "
+                f"去重统计: {result.deduplication_stats}"
+            )
+
+            return result.result
+
+        except Exception as e:
+            logger.error(f"Map-Reduce 分析失败，回退到传统模式: {e}")
+            return await self._analyze_short(content)
+
     async def analyze_incremental(
         self,
         content: str,
         existing_characters: List[Dict[str, Any]],
         start_chapter: int,
-        ai_version: int = 1
+        ai_version: int = 1,
+        progress_callback: Optional[Callable[[Any], None]] = None
     ) -> List[Dict[str, Any]]:
         """
-        嶞量分析：只分析新章节，保留用户修改的数据
+        增量分析：只分析新章节，保留用户修改的数据
 
         Args:
             content: 小说全文内容
             existing_characters: 现有人物数据
             start_chapter: 起始章节号
             ai_version: 当前AI分析版本号
+            progress_callback: 进度回调函数
 
         Returns:
             合并后的人物列表
@@ -84,6 +173,17 @@ class CharacterAnalyzer:
             return existing_characters
 
         # 分析新内容
+        if self.use_map_reduce and len(new_content) >= LONG_TEXT_THRESHOLD:
+            new_characters = await self._analyze_long(new_content, progress_callback)
+        else:
+            new_characters = await self._analyze_incremental_short(new_content)
+
+        # 合并数据
+        merged = self._merge_characters(existing_characters, new_characters, ai_version)
+        return merged
+
+    async def _analyze_incremental_short(self, new_content: str) -> List[Dict[str, Any]]:
+        """短文本增量分析（原有逻辑）"""
         truncated_new = new_content[:MAX_CONTENT_LENGTH]
         prompt = f"""请分析以下小说新内容，提取其中出现的人物信息。
 
@@ -109,10 +209,7 @@ class CharacterAnalyzer:
 
         response = await self.agent.generate(prompt)
         new_characters = self.json_parser.safe_parse_json(response, default=[])
-
-        # 合并数据
-        merged = self._merge_characters(existing_characters, new_characters, ai_version)
-        return merged
+        return new_characters
 
     def _merge_characters(
         self,

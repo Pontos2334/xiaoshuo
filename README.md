@@ -19,9 +19,9 @@
 ## 技术栈
 
 ### 前端
-- **框架**: Next.js 14 + React 18
+- **框架**: Next.js 16 + React 19
 - **UI组件**: shadcn/ui + Tailwind CSS
-- **图谱可视化**: AntV G6 v5 (人物关系图) + React Flow (情节关联图)
+- **图谱可视化**: AntV G6 v5 (人物关系图) + @xyflow/react (情节关联图)
 - **状态管理**: Zustand
 - **语言**: TypeScript
 

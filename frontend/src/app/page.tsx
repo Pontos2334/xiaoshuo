@@ -10,6 +10,27 @@ import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNo
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002/api';
 
+// 带超时的 fetch 工具函数
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 120000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('请求超时，请稍后重试');
+    }
+    throw error;
+  }
+};
+
 export type AnalyzeMode = 'full' | 'incremental';
 
 export default function Home() {
@@ -129,9 +150,11 @@ export default function Home() {
 
     try {
       setStatusMessage('正在读取小说内容...');
-      const response = await fetch(`${API_URL}/characters/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`, {
-        method: 'POST',
-      });
+      const response = await fetchWithTimeout(
+        `${API_URL}/characters/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`,
+        { method: 'POST' },
+        180000 // 3分钟超时（长文本分析可能需要较长时间）
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -149,9 +172,11 @@ export default function Home() {
 
         // 分析人物关系
         setStatusMessage('正在分析人物关系...');
-        const relResponse = await fetch(`${API_URL}/characters/relations/analyze?novel_id=${currentNovel.id}`, {
-          method: 'POST',
-        });
+        const relResponse = await fetchWithTimeout(
+          `${API_URL}/characters/relations/analyze?novel_id=${currentNovel.id}`,
+          { method: 'POST' },
+          120000 // 2分钟超时
+        );
         const relData = await relResponse.json();
         if (relData.success) {
           setRelations(relData.data || []);
@@ -162,7 +187,12 @@ export default function Home() {
       }
     } catch (error) {
       console.error('分析人物失败:', error);
-      toast.error(`分析失败: ${(error as Error).message}`);
+      const errorMsg = (error as Error).message;
+      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        toast.error('网络连接失败，请检查后端服务是否运行');
+      } else {
+        toast.error(`分析失败: ${errorMsg}`);
+      }
     } finally {
       setIsAnalyzing(false);
       setTimeout(() => setStatusMessage(''), 3000);
@@ -182,9 +212,11 @@ export default function Home() {
 
     try {
       setStatusMessage('正在读取小说内容...');
-      const response = await fetch(`${API_URL}/plots/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`, {
-        method: 'POST',
-      });
+      const response = await fetchWithTimeout(
+        `${API_URL}/plots/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`,
+        { method: 'POST' },
+        180000 // 3分钟超时
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -202,9 +234,11 @@ export default function Home() {
 
         // 分析情节连接
         setStatusMessage('正在分析情节关联...');
-        const connResponse = await fetch(`${API_URL}/plots/connections/analyze?novel_id=${currentNovel.id}`, {
-          method: 'POST',
-        });
+        const connResponse = await fetchWithTimeout(
+          `${API_URL}/plots/connections/analyze?novel_id=${currentNovel.id}`,
+          { method: 'POST' },
+          120000 // 2分钟超时
+        );
         const connData = await connResponse.json();
         if (connData.success) {
           setPlotConnections(connData.data || []);
@@ -215,7 +249,12 @@ export default function Home() {
       }
     } catch (error) {
       console.error('分析情节失败:', error);
-      toast.error(`分析失败: ${(error as Error).message}`);
+      const errorMsg = (error as Error).message;
+      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        toast.error('网络连接失败，请检查后端服务是否运行');
+      } else {
+        toast.error(`分析失败: ${errorMsg}`);
+      }
     } finally {
       setIsAnalyzing(false);
       setTimeout(() => setStatusMessage(''), 3000);
