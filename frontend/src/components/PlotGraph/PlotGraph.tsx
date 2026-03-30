@@ -29,9 +29,11 @@ import {
 import { usePlotStore } from '@/stores';
 import { PlotNode as PlotNodeType, PlotConnection } from '@/types';
 import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown } from 'lucide-react';
+import { API_URL } from '@/lib/constants';
+import { toast } from 'sonner';
 import { PlotNodeComponent } from './PlotNode';
 import { getLayoutedElements, extractChapterNumber } from '@/lib/layoutUtils';
-import { AnalyzeMode } from '@/app/page';
+import { AnalyzeMode } from '@/types';
 
 interface PlotGraphProps {
   onAnalyze?: (mode?: AnalyzeMode) => void;
@@ -179,19 +181,33 @@ export function PlotGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental',
     setEditDialogOpen(true);
   }, []);
 
-  const handleSaveEdit = useCallback(() => {
-    if (editingPlot) {
-      updatePlotNode(editingPlot.id, editingPlot);
-      setEditDialogOpen(false);
-      setEditingPlot(null);
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingPlot) return;
+    updatePlotNode(editingPlot.id, editingPlot);
+    setEditDialogOpen(false);
+    setEditingPlot(null);
+    try {
+      await fetch(`${API_URL}/plots/${editingPlot.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingPlot),
+      });
+    } catch (error) {
+      console.error('保存情节失败:', error);
+      toast.error('保存到后端失败');
     }
   }, [editingPlot, updatePlotNode]);
 
   const handleDelete = useCallback(
-    (id: string) => {
-      if (confirm('确定要删除这个情节节点吗？')) {
-        deletePlotNode(id);
-        setSelectedPlotNode(null);
+    async (id: string) => {
+      if (!confirm('确定要删除这个情节节点吗？')) return;
+      deletePlotNode(id);
+      setSelectedPlotNode(null);
+      try {
+        await fetch(`${API_URL}/plots/${id}`, { method: 'DELETE' });
+      } catch (error) {
+        console.error('删除情节失败:', error);
+        toast.error('从后端删除失败');
       }
     },
     [deletePlotNode, setSelectedPlotNode]

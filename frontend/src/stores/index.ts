@@ -130,10 +130,12 @@ export const useInspirationStore = create<InspirationState>((set) => ({
 }));
 
 // UI状态Store
+export type TabId = 'characters' | 'plots' | 'inspiration' | 'search' | 'knowledge' | 'chat' | 'assistant';
+
 interface UIState {
-  activeTab: 'characters' | 'plots' | 'inspiration';
+  activeTab: TabId;
   sidebarOpen: boolean;
-  setActiveTab: (tab: 'characters' | 'plots' | 'inspiration') => void;
+  setActiveTab: (tab: TabId) => void;
   setSidebarOpen: (open: boolean) => void;
 }
 

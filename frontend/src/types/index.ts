@@ -79,16 +79,5 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-// 分页请求
-export interface PaginationParams {
-  page: number;
-  pageSize: number;
-}
-
-// 分页响应
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
+// 分析模式
+export type AnalyzeMode = 'full' | 'incremental';

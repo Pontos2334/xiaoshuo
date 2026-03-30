@@ -5,7 +5,6 @@
 支持多轮抽取 (Gleaning) 最大化实体数量
 """
 
-import os
 import re
 import json
 import logging
@@ -13,6 +12,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 from anthropic import Anthropic
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +166,9 @@ class NovelEntityExtractor:
         max_gleanings: int = 1,
         entity_types: List[str] = None
     ):
-        self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
-        self.base_url = base_url or os.getenv('ANTHROPIC_BASE_URL')
-        self.model = model or os.getenv('CLAUDE_MODEL', 'glm-5')
+        self.api_key = api_key or settings.ANTHROPIC_API_KEY
+        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
+        self.model = model or settings.CLAUDE_MODEL
         self.max_gleanings = max_gleanings
         self.entity_types = entity_types or self.DEFAULT_ENTITY_TYPES
 

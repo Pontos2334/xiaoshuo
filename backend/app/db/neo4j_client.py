@@ -1,12 +1,8 @@
-import os
 from typing import Optional
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable
 import logging
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +13,9 @@ class Neo4jClient:
     _instance: Optional["Neo4jClient"] = None
 
     def __init__(self):
-        self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        self.user = os.getenv("NEO4J_USER", "neo4j")
-        self.password = os.getenv("NEO4J_PASSWORD", "10001026")
+        self.uri = settings.NEO4J_URI
+        self.user = settings.NEO4J_USER
+        self.password = settings.NEO4J_PASSWORD
 
         try:
             self.driver = GraphDatabase.driver(

@@ -1,14 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
 import { PlotGraph } from '@/components/PlotGraph/PlotGraph';
 import { InspirationPanel } from '@/components/InspirationPanel/InspirationPanel';
-import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNovelStore } from '@/stores';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002/api';
+const VectorSearch = lazy(() => import('@/components/VectorSearch/VectorSearch').then(m => ({ default: m.VectorSearch })));
+const KnowledgeGraph = lazy(() => import('@/components/KnowledgeGraph/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
+const CharacterChat = lazy(() => import('@/components/CharacterChat/CharacterChat').then(m => ({ default: m.CharacterChat })));
+const AIAssistant = lazy(() => import('@/components/AIAssistant/AIAssistant').then(m => ({ default: m.AIAssistant })));
+
+import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNovelStore } from '@/stores';
+import { API_URL } from '@/lib/constants';
+import { AnalyzeMode } from '@/types';
 
 // 带超时的 fetch 工具函数
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 120000) => {
@@ -30,8 +36,6 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout 
     throw error;
   }
 };
-
-export type AnalyzeMode = 'full' | 'incremental';
 
 export default function Home() {
   const { activeTab } = useUIStore();
@@ -335,6 +339,26 @@ export default function Home() {
       )}
       {activeTab === 'inspiration' && (
         <InspirationPanel onGenerateInspiration={handleGenerateInspiration} isAnalyzing={isAnalyzing} />
+      )}
+      {activeTab === 'search' && currentNovel && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+          <VectorSearch novelId={currentNovel.id} />
+        </Suspense>
+      )}
+      {activeTab === 'knowledge' && currentNovel && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+          <KnowledgeGraph novelId={currentNovel.id} novelName={currentNovel.name} />
+        </Suspense>
+      )}
+      {activeTab === 'chat' && currentNovel && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+          <CharacterChat novelId={currentNovel.id} novelName={currentNovel.name} />
+        </Suspense>
+      )}
+      {activeTab === 'assistant' && currentNovel && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+          <AIAssistant novelId={currentNovel.id} novelName={currentNovel.name} />
+        </Suspense>
       )}
     </MainLayout>
   );

@@ -4,7 +4,6 @@ Qdrant 向量数据库服务
 提供向量存储和语义搜索功能
 """
 
-import os
 import uuid
 import logging
 from typing import Dict, Any, List, Optional, Tuple
@@ -13,6 +12,7 @@ from datetime import datetime
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 
+from app.core.config import settings
 from .embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class QdrantVectorService:
             url: Qdrant 服务 URL (默认: http://localhost:6333)
             embedding_service: Embedding 服务实例
         """
-        self.url = url or os.getenv('QDRANT_URL', 'http://localhost:6333')
+        self.url = url or settings.QDRANT_URL
 
         try:
             self.client = QdrantClient(

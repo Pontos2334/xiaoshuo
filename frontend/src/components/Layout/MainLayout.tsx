@@ -9,7 +9,9 @@ import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useUIStore, useNovelStore } from '@/stores';
+import type { TabId } from '@/stores';
 import { Novel } from '@/types';
+import { API_URL } from '@/lib/constants';
 import {
   Users,
   GitBranch,
@@ -20,9 +22,12 @@ import {
   Loader2,
   Trash2,
   Download,
+  Search,
+  Network,
+  MessageSquare,
+  Sparkles,
 } from 'lucide-react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002/api';
 const LAST_PATH_KEY = 'novel-assistant-last-path';
 
 interface MainLayoutProps {
@@ -62,7 +67,6 @@ export function MainLayout({ children }: MainLayoutProps) {
           const data = await response.json();
           if (data && data.length > 0) {
             setNovels(data);
-            // 如果有保存的路径，尝试选择对应的小说
             const savedPath = localStorage.getItem(LAST_PATH_KEY);
             if (savedPath) {
               const savedNovel = data.find((n: { name: string; path: string }) =>
@@ -88,7 +92,6 @@ export function MainLayout({ children }: MainLayoutProps) {
   // 使用系统文件选择器
   const handleSelectFolder = async () => {
     if (!window.showDirectoryPicker) {
-      // 不支持 File System Access API，打开手动输入对话框
       setFolderDialogOpen(true);
       return;
     }
@@ -98,21 +101,15 @@ export function MainLayout({ children }: MainLayoutProps) {
       const dirHandle = await window.showDirectoryPicker() as ExtendedFileSystemDirectoryHandle;
       const folderName = dirHandle.name;
 
-      // 读取文件夹中的所有文件
       const files: { name: string; content: string; size: number }[] = [];
 
       for await (const entry of dirHandle.values()) {
         if (entry.kind === 'file') {
           const fileHandle = entry as ExtendedFileSystemFileHandle;
           const file = await fileHandle.getFile();
-          // 只处理 txt 和 md 文件
           if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
             const content = await file.text();
-            files.push({
-              name: file.name,
-              content,
-              size: file.size,
-            });
+            files.push({ name: file.name, content, size: file.size });
           }
         }
       }
@@ -123,20 +120,15 @@ export function MainLayout({ children }: MainLayoutProps) {
         return;
       }
 
-      // 发送文件内容到后端处理
       const response = await fetch(`${API_URL}/files/upload-folder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          folderName,
-          files,
-        }),
+        body: JSON.stringify({ folderName, files }),
       });
 
       const data = await response.json();
 
       if (data.success && data.data) {
-        // 追加新小说到列表，而不是替换
         const newNovels = data.data.filter(
           (newNovel: Novel) => !novels.some((n) => n.id === newNovel.id)
         );
@@ -144,17 +136,13 @@ export function MainLayout({ children }: MainLayoutProps) {
         if (data.data.length > 0) {
           setCurrentNovel(data.data[0]);
         }
-        // 保存文件夹名称
         localStorage.setItem(LAST_PATH_KEY, folderName);
         toast.success(`已添加 ${newNovels.length} 部小说`);
       } else {
         toast.error(data.error || '处理文件夹失败');
       }
     } catch (error) {
-      // 用户取消选择
-      if ((error as Error).name === 'AbortError') {
-        return;
-      }
+      if ((error as Error).name === 'AbortError') return;
       console.error('选择文件夹失败:', error);
       toast.error('选择文件夹失败，请重试');
     } finally {
@@ -190,40 +178,23 @@ export function MainLayout({ children }: MainLayoutProps) {
   };
 
   const handleScanFolder = () => scanFolder(folderPath);
-
-  const handleOpenFolder = () => {
-    handleSelectFolder();
-  };
+  const handleOpenFolder = () => handleSelectFolder();
 
   // 删除小说
   const handleDeleteNovel = async (novel: Novel, e: React.MouseEvent) => {
-    e.stopPropagation(); // 防止触发选择
-
-    if (!confirm(`确定要删除《${novel.name}》吗？\n\n这将同时删除该小说的所有人物、情节和灵感数据。`)) {
-      return;
-    }
+    e.stopPropagation();
+    if (!confirm(`确定要删除《${novel.name}》吗？\n\n这将同时删除该小说的所有人物、情节和灵感数据。`)) return;
 
     try {
-      const response = await fetch(`${API_URL}/files/novels/${novel.id}`, {
-        method: 'DELETE',
-      });
-
+      const response = await fetch(`${API_URL}/files/novels/${novel.id}`, { method: 'DELETE' });
       const data = await response.json();
 
       if (data.success) {
-        // 从列表中移除
         const updatedNovels = novels.filter((n) => n.id !== novel.id);
         setNovels(updatedNovels);
-
-        // 如果删除的是当前选中的小说，切换到其他小说
         if (currentNovel?.id === novel.id) {
-          if (updatedNovels.length > 0) {
-            setCurrentNovel(updatedNovels[0]);
-          } else {
-            setCurrentNovel(null);
-          }
+          setCurrentNovel(updatedNovels.length > 0 ? updatedNovels[0] : null);
         }
-
         toast.success(data.data?.message || '删除成功');
       } else {
         toast.error(data.error || '删除失败');
@@ -236,18 +207,14 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // 导出小说
   const handleExportNovel = async (novel: Novel, e: React.MouseEvent) => {
-    e.stopPropagation(); // 防止触发选择
-
+    e.stopPropagation();
     try {
       const response = await fetch(`${API_URL}/files/novels/${novel.id}/export`);
-
       if (!response.ok) {
         const data = await response.json();
         toast.error(data.detail || '导出失败');
         return;
       }
-
-      // 下载文件
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -257,7 +224,6 @@ export function MainLayout({ children }: MainLayoutProps) {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-
       toast.success('导出成功');
     } catch (error) {
       console.error('导出小说失败:', error);
@@ -265,16 +231,22 @@ export function MainLayout({ children }: MainLayoutProps) {
     }
   };
 
+  const tabs: { value: TabId; label: string; icon: ReactNode }[] = [
+    { value: 'characters', label: '人物关系图', icon: <Users className="h-4 w-4" /> },
+    { value: 'plots', label: '情节关联图', icon: <GitBranch className="h-4 w-4" /> },
+    { value: 'inspiration', label: '灵感提示', icon: <Lightbulb className="h-4 w-4" /> },
+    { value: 'search', label: '语义搜索', icon: <Search className="h-4 w-4" /> },
+    { value: 'knowledge', label: '知识图谱', icon: <Network className="h-4 w-4" /> },
+    { value: 'chat', label: '人物对话', icon: <MessageSquare className="h-4 w-4" /> },
+    { value: 'assistant', label: '智能助手', icon: <Sparkles className="h-4 w-4" /> },
+  ];
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="h-14 border-b flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}>
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           <h1 className="text-xl font-bold">小说创作助手</h1>
@@ -368,43 +340,24 @@ export function MainLayout({ children }: MainLayoutProps) {
 
         {/* Content Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="flex-1 flex flex-col overflow-hidden">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="flex-1 flex flex-col overflow-hidden">
             <div className="border-b px-4 shrink-0">
-              <TabsList>
-                <TabsTrigger value="characters" className="gap-2">
-                  <Users className="h-4 w-4" />
-                  人物关系图
-                </TabsTrigger>
-                <TabsTrigger value="plots" className="gap-2">
-                  <GitBranch className="h-4 w-4" />
-                  情节关联图
-                </TabsTrigger>
-                <TabsTrigger value="inspiration" className="gap-2">
-                  <Lightbulb className="h-4 w-4" />
-                  灵感提示
-                </TabsTrigger>
+              <TabsList className="flex-wrap h-auto gap-1">
+                {tabs.map((tab) => (
+                  <TabsTrigger key={tab.value} value={tab.value} className="gap-1.5 text-xs">
+                    {tab.icon}
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </div>
 
-            <TabsContent value="characters" className="flex-1 m-0 overflow-hidden">
-              <ScrollArea className="h-full">
-                <div className="p-4">
-                  {children}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="plots" className="flex-1 m-0 overflow-hidden">
-              <ScrollArea className="h-full">
-                <div className="p-4">
-                  {children}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="inspiration" className="flex-1 m-0 overflow-auto p-4">
-              {children}
-            </TabsContent>
+            {/* Fix: only render children in the active tab, not all tabs */}
+            {tabs.map((tab) => (
+              <TabsContent key={tab.value} value={tab.value} className="flex-1 m-0 overflow-hidden">
+                {activeTab === tab.value && children}
+              </TabsContent>
+            ))}
           </Tabs>
         </main>
       </div>

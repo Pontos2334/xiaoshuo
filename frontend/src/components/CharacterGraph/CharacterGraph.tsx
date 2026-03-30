@@ -28,11 +28,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCharacterStore } from '@/stores';
+import { API_URL } from '@/lib/constants';
 import { Character, CharacterRelation } from '@/types';
 import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { CharacterNode } from './CharacterNode';
 import { getLayoutedElements } from '@/lib/layoutUtils';
-import { AnalyzeMode } from '@/app/page';
+import { AnalyzeMode } from '@/types';
 
 interface CharacterGraphProps {
   onAnalyze?: (mode?: AnalyzeMode) => void;
@@ -159,19 +161,33 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
     setEditDialogOpen(true);
   }, []);
 
-  const handleSaveEdit = useCallback(() => {
-    if (editingCharacter) {
-      updateCharacter(editingCharacter.id, editingCharacter);
-      setEditDialogOpen(false);
-      setEditingCharacter(null);
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingCharacter) return;
+    updateCharacter(editingCharacter.id, editingCharacter);
+    setEditDialogOpen(false);
+    setEditingCharacter(null);
+    try {
+      await fetch(`${API_URL}/characters/${editingCharacter.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingCharacter),
+      });
+    } catch (error) {
+      console.error('保存人物失败:', error);
+      toast.error('保存到后端失败');
     }
   }, [editingCharacter, updateCharacter]);
 
   const handleDelete = useCallback(
-    (id: string) => {
-      if (confirm('确定要删除这个人物吗？')) {
-        deleteCharacter(id);
-        setSelectedCharacter(null);
+    async (id: string) => {
+      if (!confirm('确定要删除这个人物吗？')) return;
+      deleteCharacter(id);
+      setSelectedCharacter(null);
+      try {
+        await fetch(`${API_URL}/characters/${id}`, { method: 'DELETE' });
+      } catch (error) {
+        console.error('删除人物失败:', error);
+        toast.error('从后端删除失败');
       }
     },
     [deleteCharacter, setSelectedCharacter]
@@ -245,20 +261,35 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
     setEditRelationDialogOpen(true);
   }, []);
 
-  const handleSaveEditRelation = useCallback(() => {
-    if (editingRelation) {
-      updateRelation(editingRelation.id, editingRelation);
-      setEditRelationDialogOpen(false);
-      setEditingRelation(null);
-      setSelectedRelation(editingRelation);
+  const handleSaveEditRelation = useCallback(async () => {
+    if (!editingRelation) return;
+    updateRelation(editingRelation.id, editingRelation);
+    setEditRelationDialogOpen(false);
+    const saved = editingRelation;
+    setEditingRelation(null);
+    setSelectedRelation(saved);
+    try {
+      await fetch(`${API_URL}/characters/relations/${saved.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(saved),
+      });
+    } catch (error) {
+      console.error('保存关系失败:', error);
+      toast.error('保存关系到后端失败');
     }
   }, [editingRelation, updateRelation]);
 
   const handleDeleteRelation = useCallback(
-    (id: string) => {
-      if (confirm('确定要删除这个关系吗？')) {
-        deleteRelation(id);
-        setSelectedRelation(null);
+    async (id: string) => {
+      if (!confirm('确定要删除这个关系吗？')) return;
+      deleteRelation(id);
+      setSelectedRelation(null);
+      try {
+        await fetch(`${API_URL}/characters/relations/${id}`, { method: 'DELETE' });
+      } catch (error) {
+        console.error('删除关系失败:', error);
+        toast.error('从后端删除关系失败');
       }
     },
     [deleteRelation]

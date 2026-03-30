@@ -6,9 +6,10 @@ Embedding 服务
 2. 本地模型 (sentence-transformers)
 """
 
-import os
 import logging
 from typing import List, Optional
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +64,9 @@ class EmbeddingService:
             use_local: 是否使用本地模型
             local_model_path: 本地模型路径
         """
-        # 从环境变量读取配置
-        self.use_local = use_local if use_local is not None else (
-            os.getenv('EMBEDDING_USE_LOCAL', 'false').lower() == 'true'
-        )
-        self.local_model_path = local_model_path or os.getenv(
-            'EMBEDDING_LOCAL_MODEL',
-            'paraphrase-multilingual-MiniLM-L12-v2'
-        )
+        # 从配置读取
+        self.use_local = use_local if use_local is not None else settings.EMBEDDING_USE_LOCAL
+        self.local_model_path = local_model_path or settings.EMBEDDING_LOCAL_MODEL
 
         if self.use_local:
             self._init_local_model()
@@ -78,9 +74,9 @@ class EmbeddingService:
             # 云端模式
             from openai import OpenAI
 
-            self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
-            self.base_url = base_url or os.getenv('EMBEDDING_BASE_URL', os.getenv('ANTHROPIC_BASE_URL'))
-            self.model = model or os.getenv('EMBEDDING_MODEL', 'text-embedding-v3')
+            self.api_key = api_key or settings.ANTHROPIC_API_KEY
+            self.base_url = base_url or settings.ANTHROPIC_BASE_URL
+            self.model = model or 'text-embedding-v3'
 
             if self.api_key:
                 self.client = OpenAI(

@@ -1,10 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
+
+from app.core.config import settings
 
 # 数据库路径
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./novel_assistant.db")
+DATABASE_URL = settings.DATABASE_URL
 
 engine = create_engine(
     DATABASE_URL,

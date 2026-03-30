@@ -1,13 +1,11 @@
 import os
+import asyncio
 import logging
 import json
 from typing import Optional
 from datetime import datetime
-from dotenv import load_dotenv
+from app.core.config import settings
 import anthropic
-
-# 加载环境变量
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +14,10 @@ class ClaudeAgentClient:
     """Claude Agent客户端，支持智谱AI等兼容API"""
 
     def __init__(self):
-        self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self.base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-        self.model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
-        self.max_tokens = int(os.getenv("MAX_TOKENS", "4096"))
+        self.api_key = settings.ANTHROPIC_API_KEY
+        self.base_url = settings.ANTHROPIC_BASE_URL
+        self.model = settings.CLAUDE_MODEL
+        self.max_tokens = settings.MAX_TOKENS
 
         # 日志保存目录
         self.log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "llm")
@@ -61,12 +59,13 @@ class ClaudeAgentClient:
             logger.warning(f"保存 LLM 日志失败: {e}")
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """生成响应"""
+        """生成响应（使用 asyncio.to_thread 避免阻塞事件循环）"""
         if self.client:
             try:
                 logger.info(f"调用 LLM: model={self.model}, prompt_length={len(prompt)}")
 
-                message = self.client.messages.create(
+                message = await asyncio.to_thread(
+                    self.client.messages.create,
                     model=self.model,
                     max_tokens=self.max_tokens,
                     system=system_prompt or "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。",

@@ -4,13 +4,14 @@
 从小说内容和人物信息生成详细的人物档案，用于对话系统
 """
 
-import os
 import json
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
 from anthropic import Anthropic
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +93,9 @@ class CharacterProfileGenerator:
     """
 
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
-        self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
-        self.base_url = base_url or os.getenv('ANTHROPIC_BASE_URL')
-        self.model = model or os.getenv('CLAUDE_MODEL', 'glm-5')
+        self.api_key = api_key or settings.ANTHROPIC_API_KEY
+        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
+        self.model = model or settings.CLAUDE_MODEL
 
         if self.api_key:
             self.client = Anthropic(

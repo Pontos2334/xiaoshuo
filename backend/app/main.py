@@ -57,4 +57,37 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    status = {"status": "healthy", "services": {}}
+
+    # 检查 SQLite
+    try:
+        from sqlalchemy import text
+        from app.models.database import engine
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        status["services"]["sqlite"] = "connected"
+    except Exception as e:
+        status["services"]["sqlite"] = f"error: {e}"
+        status["status"] = "degraded"
+
+    # 检查 Neo4j
+    try:
+        from app.db.neo4j_client import neo4j_client
+        if neo4j_client.driver:
+            neo4j_client.run("RETURN 1")
+            status["services"]["neo4j"] = "connected"
+        else:
+            status["services"]["neo4j"] = "not_configured"
+    except Exception as e:
+        status["services"]["neo4j"] = f"error: {e}"
+
+    # 检查 Qdrant
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{settings.QDRANT_URL}/healthz", timeout=3)
+            status["services"]["qdrant"] = "connected" if resp.status_code == 200 else f"error: {resp.status_code}"
+    except Exception as e:
+        status["services"]["qdrant"] = f"error: {e}"
+
+    return status
