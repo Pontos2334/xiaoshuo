@@ -11,22 +11,22 @@ interface CharacterNodeProps {
 
 function CharacterNodeComponent({ data }: CharacterNodeProps) {
   const emotionColors: Record<string, string> = {
-    '正义': 'bg-blue-100 border-blue-400',
-    '邪恶': 'bg-red-100 border-red-400',
-    '中立': 'bg-gray-100 border-gray-400',
-    'default': 'bg-indigo-100 border-indigo-400',
+    '正义': 'bg-blue-50/90 border-blue-200/80 shadow-sm shadow-blue-100/40',
+    '邪恶': 'bg-red-50/90 border-red-200/80 shadow-sm shadow-red-100/40',
+    '中立': 'bg-slate-50/90 border-slate-200/80 shadow-sm shadow-slate-100/40',
+    'default': 'bg-primary/[0.03] border-primary/15 shadow-sm shadow-primary/5',
   };
 
   const bgColor = emotionColors[data.basicInfo?.身份] || emotionColors.default;
 
   return (
-    <div className={`px-4 py-3 rounded-lg border-2 min-w-[120px] shadow-md ${bgColor}`}>
+    <div className={`px-4 py-3 rounded-xl border min-w-[120px] backdrop-blur-sm transition-shadow hover:shadow-md ${bgColor}`}>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0" />
 
-      <div className="font-bold text-sm text-center mb-1">{data.name}</div>
+      <div className="font-semibold text-sm text-center mb-1">{data.name}</div>
 
       {data.basicInfo?.身份 && (
-        <Badge variant="outline" className="text-xs block text-center mb-1">
+        <Badge variant="outline" className="text-[10px] block text-center mx-auto">
           {data.basicInfo.身份}
         </Badge>
       )}

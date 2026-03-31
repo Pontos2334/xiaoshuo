@@ -29,22 +29,22 @@ export function ChatMessage({ role, content, emotion, characterName, timestamp }
     <div className={cn('flex w-full mb-4', isUser ? 'justify-end' : 'justify-start')}>
       <div
         className={cn(
-          'max-w-[75%] rounded-xl px-4 py-3 text-sm leading-relaxed break-words',
+          'max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed break-words shadow-sm',
           isUser
-            ? 'bg-primary text-primary-foreground rounded-br-sm'
-            : 'bg-muted text-foreground rounded-bl-sm'
+            ? 'bg-primary text-primary-foreground rounded-br-md'
+            : 'bg-card text-card-foreground border rounded-bl-md'
         )}
       >
         {/* Character name and emotion badge for assistant messages */}
         {!isUser && (characterName || emotionInfo) && (
           <div className="flex items-center gap-2 mb-1.5">
             {characterName && (
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-xs font-medium text-primary/70">
                 {characterName}
               </span>
             )}
             {emotionInfo && (
-              <Badge variant="secondary" className="text-xs gap-1">
+              <Badge variant="secondary" className="text-[10px] gap-1 py-0">
                 {emotionInfo.emoji} {emotionInfo.label}
               </Badge>
             )}
@@ -65,7 +65,7 @@ export function ChatMessage({ role, content, emotion, characterName, timestamp }
           <div
             className={cn(
               'text-[10px] mt-1.5',
-              isUser ? 'text-primary-foreground/60' : 'text-muted-foreground'
+              isUser ? 'text-primary-foreground/50' : 'text-muted-foreground/60'
             )}
           >
             {new Date(timestamp).toLocaleTimeString('zh-CN', {

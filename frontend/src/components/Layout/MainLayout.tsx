@@ -26,6 +26,8 @@ import {
   Network,
   MessageSquare,
   Sparkles,
+  Globe,
+  BookOpen,
 } from 'lucide-react';
 
 const LAST_PATH_KEY = 'novel-assistant-last-path';
@@ -239,26 +241,32 @@ export function MainLayout({ children }: MainLayoutProps) {
     { value: 'knowledge', label: '知识图谱', icon: <Network className="h-4 w-4" /> },
     { value: 'chat', label: '人物对话', icon: <MessageSquare className="h-4 w-4" /> },
     { value: 'assistant', label: '智能助手', icon: <Sparkles className="h-4 w-4" /> },
+    { value: 'worldbuilding', label: '世界观', icon: <Globe className="h-4 w-4" /> },
   ];
 
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="h-14 border-b flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}>
+      <header className="h-14 flex items-center justify-between px-4 shrink-0 bg-white header-gradient-border">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="text-muted-foreground hover:text-foreground">
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <h1 className="text-xl font-bold">小说创作助手</h1>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary/8 flex items-center justify-center">
+              <BookOpen className="h-4 w-4 text-primary" />
+            </div>
+            <h1 className="text-lg font-semibold tracking-tight">小说创作助手</h1>
+          </div>
           {currentNovel && (
             <>
-              <Separator orientation="vertical" className="h-6" />
-              <span className="text-muted-foreground">{currentNovel.name}</span>
+              <Separator orientation="vertical" className="h-5 mx-1" />
+              <span className="text-sm text-muted-foreground font-medium">{currentNovel.name}</span>
             </>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleOpenFolder} disabled={isLoading}>
+          <Button variant="outline" size="sm" onClick={handleOpenFolder} disabled={isLoading} className="shadow-sm hover:shadow transition-shadow">
             {isLoading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
@@ -273,36 +281,35 @@ export function MainLayout({ children }: MainLayoutProps) {
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <aside
-          className={`border-r transition-all duration-300 ${
+          className={`border-r transition-all duration-300 bg-white ${
             sidebarOpen ? 'w-64' : 'w-0'
           } overflow-hidden`}
         >
           <ScrollArea className="h-full">
             <div className="p-4">
-              <h2 className="font-semibold mb-4">小说列表</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">小说列表</h2>
               <div className="space-y-2">
                 {novels.length > 0 ? (
                   novels.map((novel) => (
                     <div
                       key={novel.id}
-                      className={`p-2 rounded-md cursor-pointer text-sm transition-colors group ${
+                      className={`group relative p-3 rounded-lg cursor-pointer text-sm transition-all duration-200 ${
                         currentNovel?.id === novel.id
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted hover:bg-muted/80'
+                          ? 'bg-primary/[0.05] border border-primary/15'
+                          : 'border border-transparent hover:bg-muted/40'
                       }`}
                       onClick={() => setCurrentNovel(novel)}
                     >
+                      {currentNovel?.id === novel.id && (
+                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary" />
+                      )}
                       <div className="flex items-center justify-between">
-                        <div className="font-medium truncate flex-1">{novel.name}</div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="font-medium truncate flex-1 pl-1">{novel.name}</div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-6 w-6 ${
-                              currentNovel?.id === novel.id
-                                ? 'text-primary-foreground hover:bg-primary-foreground/20'
-                                : 'text-muted-foreground hover:bg-muted-foreground/20'
-                            }`}
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
                             onClick={(e) => handleExportNovel(novel, e)}
                             title="导出"
                           >
@@ -311,11 +318,7 @@ export function MainLayout({ children }: MainLayoutProps) {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-6 w-6 ${
-                              currentNovel?.id === novel.id
-                                ? 'text-primary-foreground hover:bg-primary-foreground/20'
-                                : 'text-muted-foreground hover:bg-muted-foreground/20 hover:text-destructive'
-                            }`}
+                            className="h-6 w-6 text-muted-foreground hover:text-destructive"
                             onClick={(e) => handleDeleteNovel(novel, e)}
                             title="删除"
                           >
@@ -323,14 +326,15 @@ export function MainLayout({ children }: MainLayoutProps) {
                           </Button>
                         </div>
                       </div>
-                      <div className={`text-xs ${currentNovel?.id === novel.id ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                      <div className={`text-xs mt-0.5 pl-1 ${currentNovel?.id === novel.id ? 'text-primary/50' : 'text-muted-foreground/70'}`}>
                         {((novel as Record<string, unknown>).chapter_count ?? novel.chapterCount ?? 0) as number} 章 · {((novel as Record<string, unknown>).word_count ?? novel.wordCount ?? 0) as number} 字
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="p-2 rounded-md bg-muted text-sm text-muted-foreground">
-                    暂无小说，请打开文件夹
+                  <div className="p-4 rounded-lg border border-dashed text-center space-y-1">
+                    <p className="text-xs text-muted-foreground">暂无小说</p>
+                    <p className="text-[11px] text-muted-foreground/60">打开文件夹添加</p>
                   </div>
                 )}
               </div>
@@ -341,10 +345,14 @@ export function MainLayout({ children }: MainLayoutProps) {
         {/* Content Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="flex-1 flex flex-col overflow-hidden">
-            <div className="border-b px-4 shrink-0">
-              <TabsList className="flex-wrap h-auto gap-1">
+            <div className="border-b px-4 py-2 shrink-0 bg-muted/15">
+              <TabsList className="bg-transparent h-auto p-0 gap-0.5 inline-flex flex-wrap">
                 {tabs.map((tab) => (
-                  <TabsTrigger key={tab.value} value={tab.value} className="gap-1.5 text-xs">
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="gap-1.5 text-xs px-3 py-1.5 rounded-md transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary"
+                  >
                     {tab.icon}
                     {tab.label}
                   </TabsTrigger>

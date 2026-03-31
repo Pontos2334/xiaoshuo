@@ -11,6 +11,7 @@ const VectorSearch = lazy(() => import('@/components/VectorSearch/VectorSearch')
 const KnowledgeGraph = lazy(() => import('@/components/KnowledgeGraph/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
 const CharacterChat = lazy(() => import('@/components/CharacterChat/CharacterChat').then(m => ({ default: m.CharacterChat })));
 const AIAssistant = lazy(() => import('@/components/AIAssistant/AIAssistant').then(m => ({ default: m.AIAssistant })));
+const WorldBuildingComp = lazy(() => import('@/components/WorldBuilding/WorldBuilding').then(m => ({ default: m.WorldBuilding })));
 
 import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNovelStore } from '@/stores';
 import { API_URL } from '@/lib/constants';
@@ -310,7 +311,7 @@ export default function Home() {
     <MainLayout>
       {/* 全局状态提示 */}
       {(isAnalyzing || statusMessage) && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-primary text-primary-foreground px-4 py-2 rounded-md shadow-lg flex items-center gap-2">
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-primary/95 backdrop-blur-sm text-primary-foreground px-5 py-2.5 rounded-full shadow-lg shadow-primary/20 flex items-center gap-2.5 text-sm font-medium">
           {isAnalyzing && (
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -341,23 +342,28 @@ export default function Home() {
         <InspirationPanel onGenerateInspiration={handleGenerateInspiration} isAnalyzing={isAnalyzing} />
       )}
       {activeTab === 'search' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
           <VectorSearch novelId={currentNovel.id} />
         </Suspense>
       )}
       {activeTab === 'knowledge' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
           <KnowledgeGraph novelId={currentNovel.id} novelName={currentNovel.name} />
         </Suspense>
       )}
       {activeTab === 'chat' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
           <CharacterChat novelId={currentNovel.id} novelName={currentNovel.name} />
         </Suspense>
       )}
       {activeTab === 'assistant' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><span>加载中...</span></div>}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
           <AIAssistant novelId={currentNovel.id} novelName={currentNovel.name} />
+        </Suspense>
+      )}
+      {activeTab === 'worldbuilding' && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+          <WorldBuildingComp />
         </Suspense>
       )}
     </MainLayout>
