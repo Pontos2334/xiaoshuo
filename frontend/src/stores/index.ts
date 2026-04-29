@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { shallow } from 'zustand/shallow';
-import { Character, CharacterRelation, PlotNode, PlotConnection, Novel, Inspiration } from '@/types';
+import { Character, CharacterRelation, PlotNode, PlotConnection, Novel, Inspiration, Chapter, WorldEntity, EntityRelation, Foreshadow, CharacterArcPoint, TensionPoint, OutlineNode } from '@/types';
 
 // 导出 shallow 用于组件中的性能优化
 export { shallow };
@@ -130,18 +130,164 @@ export const useInspirationStore = create<InspirationState>((set) => ({
 }));
 
 // UI状态Store
-export type TabId = 'characters' | 'plots' | 'inspiration' | 'search' | 'knowledge' | 'chat' | 'assistant';
+export type TabId = 'characters' | 'plots' | 'inspiration' | 'search' | 'knowledge' | 'chat' | 'assistant' | 'worldbuilding' | 'foreshadow' | 'arcs' | 'tension' | 'outline';
 
 interface UIState {
   activeTab: TabId;
   sidebarOpen: boolean;
+  quickSearchOpen: boolean;
   setActiveTab: (tab: TabId) => void;
   setSidebarOpen: (open: boolean) => void;
+  setQuickSearchOpen: (open: boolean) => void;
+  toggleQuickSearch: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
   activeTab: 'characters',
   sidebarOpen: true,
+  quickSearchOpen: false,
   setActiveTab: (tab) => set({ activeTab: tab }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  setQuickSearchOpen: (open) => set({ quickSearchOpen: open }),
+  toggleQuickSearch: () => set((state) => ({ quickSearchOpen: !state.quickSearchOpen })),
+}));
+
+// 章节 Store
+interface ChapterState {
+  chapters: Chapter[];
+  selectedChapterId: string | null;
+  setChapters: (chapters: Chapter[]) => void;
+  setSelectedChapterId: (id: string | null) => void;
+}
+
+export const useChapterStore = create<ChapterState>((set) => ({
+  chapters: [],
+  selectedChapterId: null,
+  setChapters: (chapters) => set({ chapters }),
+  setSelectedChapterId: (id) => set({ selectedChapterId: id }),
+}));
+
+// 世界观 Store
+interface WorldBuildingState {
+  entities: WorldEntity[];
+  entityRelations: EntityRelation[];
+  selectedEntityId: string | null;
+  setEntities: (entities: WorldEntity[]) => void;
+  setEntityRelations: (relations: EntityRelation[]) => void;
+  setSelectedEntityId: (id: string | null) => void;
+  addEntity: (entity: WorldEntity) => void;
+  updateEntity: (id: string, data: Partial<WorldEntity>) => void;
+  deleteEntity: (id: string) => void;
+}
+
+export const useWorldBuildingStore = create<WorldBuildingState>((set) => ({
+  entities: [],
+  entityRelations: [],
+  selectedEntityId: null,
+  setEntities: (entities) => set({ entities }),
+  setEntityRelations: (relations) => set({ entityRelations: relations }),
+  setSelectedEntityId: (id) => set({ selectedEntityId: id }),
+  addEntity: (entity) => set((state) => ({ entities: [...state.entities, entity] })),
+  updateEntity: (id, data) => set((state) => ({
+    entities: state.entities.map((e) => (e.id === id ? { ...e, ...data } : e)),
+  })),
+  deleteEntity: (id) => set((state) => ({
+    entities: state.entities.filter((e) => e.id !== id),
+  })),
+}));
+
+// 伏笔追踪 Store
+interface ForeshadowState {
+  foreshadows: Foreshadow[];
+  selectedForeshadowId: string | null;
+  setForeshadows: (foreshadows: Foreshadow[]) => void;
+  setSelectedForeshadowId: (id: string | null) => void;
+  addForeshadow: (f: Foreshadow) => void;
+  updateForeshadow: (id: string, data: Partial<Foreshadow>) => void;
+  deleteForeshadow: (id: string) => void;
+}
+
+export const useForeshadowStore = create<ForeshadowState>((set) => ({
+  foreshadows: [],
+  selectedForeshadowId: null,
+  setForeshadows: (foreshadows) => set({ foreshadows }),
+  setSelectedForeshadowId: (id) => set({ selectedForeshadowId: id }),
+  addForeshadow: (f) => set((state) => ({ foreshadows: [...state.foreshadows, f] })),
+  updateForeshadow: (id, data) => set((state) => ({
+    foreshadows: state.foreshadows.map((f) => (f.id === id ? { ...f, ...data } : f)),
+  })),
+  deleteForeshadow: (id) => set((state) => ({
+    foreshadows: state.foreshadows.filter((f) => f.id !== id),
+  })),
+}));
+
+// 角色弧线 Store
+interface CharacterArcState {
+  arcPoints: CharacterArcPoint[];
+  selectedCharacterId: string | null;
+  setArcPoints: (points: CharacterArcPoint[]) => void;
+  setSelectedCharacterId: (id: string | null) => void;
+  addArcPoint: (point: CharacterArcPoint) => void;
+  updateArcPoint: (id: string, data: Partial<CharacterArcPoint>) => void;
+  deleteArcPoint: (id: string) => void;
+}
+
+export const useCharacterArcStore = create<CharacterArcState>((set) => ({
+  arcPoints: [],
+  selectedCharacterId: null,
+  setArcPoints: (points) => set({ arcPoints: points }),
+  setSelectedCharacterId: (id) => set({ selectedCharacterId: id }),
+  addArcPoint: (point) => set((state) => ({ arcPoints: [...state.arcPoints, point] })),
+  updateArcPoint: (id, data) => set((state) => ({
+    arcPoints: state.arcPoints.map((p) => (p.id === id ? { ...p, ...data } : p)),
+  })),
+  deleteArcPoint: (id) => set((state) => ({
+    arcPoints: state.arcPoints.filter((p) => p.id !== id),
+  })),
+}));
+
+// 节奏张力 Store
+interface TensionState {
+  tensionPoints: TensionPoint[];
+  setTensionPoints: (points: TensionPoint[]) => void;
+  addTensionPoint: (point: TensionPoint) => void;
+  updateTensionPoint: (id: string, data: Partial<TensionPoint>) => void;
+  deleteTensionPoint: (id: string) => void;
+}
+
+export const useTensionStore = create<TensionState>((set) => ({
+  tensionPoints: [],
+  setTensionPoints: (points) => set({ tensionPoints: points }),
+  addTensionPoint: (point) => set((state) => ({ tensionPoints: [...state.tensionPoints, point] })),
+  updateTensionPoint: (id, data) => set((state) => ({
+    tensionPoints: state.tensionPoints.map((p) => (p.id === id ? { ...p, ...data } : p)),
+  })),
+  deleteTensionPoint: (id) => set((state) => ({
+    tensionPoints: state.tensionPoints.filter((p) => p.id !== id),
+  })),
+}));
+
+// 大纲 Store
+interface OutlineState {
+  outlineNodes: OutlineNode[];
+  selectedNodeId: string | null;
+  setOutlineNodes: (nodes: OutlineNode[]) => void;
+  setSelectedNodeId: (id: string | null) => void;
+  addOutlineNode: (node: OutlineNode) => void;
+  updateOutlineNode: (id: string, data: Partial<OutlineNode>) => void;
+  deleteOutlineNode: (id: string) => void;
+}
+
+export const useOutlineStore = create<OutlineState>((set) => ({
+  outlineNodes: [],
+  selectedNodeId: null,
+  setOutlineNodes: (nodes) => set({ outlineNodes: nodes }),
+  setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+  addOutlineNode: (node) => set((state) => ({ outlineNodes: [...state.outlineNodes, node] })),
+  updateOutlineNode: (id, data) => set((state) => ({
+    outlineNodes: state.outlineNodes.map((n) => (n.id === id ? { ...n, ...data } : n)),
+  })),
+  deleteOutlineNode: (id) => set((state) => ({
+    outlineNodes: state.outlineNodes.filter((n) => n.id !== id),
+  })),
 }));

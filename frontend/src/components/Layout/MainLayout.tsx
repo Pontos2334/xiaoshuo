@@ -28,6 +28,10 @@ import {
   Sparkles,
   Globe,
   BookOpen,
+  BookMarked,
+  TrendingUp,
+  Activity,
+  ListTree,
 } from 'lucide-react';
 
 const LAST_PATH_KEY = 'novel-assistant-last-path';
@@ -54,7 +58,7 @@ interface ExtendedFileSystemFileHandle extends FileSystemFileHandle {
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
-  const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen } = useUIStore();
+  const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, setQuickSearchOpen } = useUIStore();
   const { novels, currentNovel, setNovels, setCurrentNovel } = useNovelStore();
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [folderPath, setFolderPath] = useState('');
@@ -242,6 +246,10 @@ export function MainLayout({ children }: MainLayoutProps) {
     { value: 'chat', label: '人物对话', icon: <MessageSquare className="h-4 w-4" /> },
     { value: 'assistant', label: '智能助手', icon: <Sparkles className="h-4 w-4" /> },
     { value: 'worldbuilding', label: '世界观', icon: <Globe className="h-4 w-4" /> },
+    { value: 'foreshadow', label: '伏笔追踪', icon: <BookMarked className="h-4 w-4" /> },
+    { value: 'arcs', label: '角色弧线', icon: <TrendingUp className="h-4 w-4" /> },
+    { value: 'tension', label: '节奏张力', icon: <Activity className="h-4 w-4" /> },
+    { value: 'outline', label: '大纲管理', icon: <ListTree className="h-4 w-4" /> },
   ];
 
   return (
@@ -266,6 +274,10 @@ export function MainLayout({ children }: MainLayoutProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setQuickSearchOpen(true)} title="角色速查 (Ctrl+K)" className="text-muted-foreground hover:text-foreground">
+            <Search className="h-4 w-4 mr-1" />
+            <span className="text-xs hidden sm:inline">速查</span>
+          </Button>
           <Button variant="outline" size="sm" onClick={handleOpenFolder} disabled={isLoading} className="shadow-sm hover:shadow transition-shadow">
             {isLoading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

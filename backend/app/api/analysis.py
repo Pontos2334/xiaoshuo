@@ -1,7 +1,7 @@
 """
 分析 API
 
-提供带进度追踪的长文本分析接口
+提供带进度追踪的长文本分析接口，支持 SQLite 持久化
 """
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -11,9 +11,10 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
 import logging
+import json
 
 from app.models.database import get_db
-from app.models.models import Novel
+from app.models.models import Novel, AnalysisTask as AnalysisTaskModel
 from app.core.file_utils import safe_read_file
 from app.core.config import settings
 from app.services.map_reduce_analyzer import AnalysisProgress
@@ -21,8 +22,69 @@ from app.services.map_reduce_analyzer import AnalysisProgress
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 存储分析任务状态
+# 内存热缓存
 analysis_tasks: Dict[str, Dict[str, Any]] = {}
+
+
+def _persist_task(task_id: str, db: Session):
+    """持久化任务状态到数据库"""
+    if task_id not in analysis_tasks:
+        return
+    task = analysis_tasks[task_id]
+    try:
+        record = db.query(AnalysisTaskModel).filter(AnalysisTaskModel.id == task_id).first()
+        if record:
+            record.status = task.get('status', 'started')
+            record.progress = task.get('progress', {}).get('progress_percent', 0) if isinstance(task.get('progress'), dict) else 0
+            record.result = json.dumps(task.get('result'), ensure_ascii=False) if task.get('result') else None
+            record.error = task.get('error')
+        else:
+            record = AnalysisTaskModel(
+                id=task_id,
+                novel_id=task.get('novel_id'),
+                type=task.get('type'),
+                status=task.get('status', 'started'),
+                progress=0,
+            )
+            db.add(record)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"持久化任务失败: {e}")
+
+
+def _load_tasks_from_db(db: Session):
+    """从数据库恢复任务到内存"""
+    try:
+        records = db.query(AnalysisTaskModel).all()
+        for record in records:
+            if record.id not in analysis_tasks:
+                # 将未完成的任务标记为失败（服务重启）
+                status = record.status
+                if status in ('started', 'in_progress'):
+                    status = 'failed'
+                    record.status = 'failed'
+                    record.error = '服务重启，任务中断'
+
+                result = None
+                if record.result:
+                    try:
+                        result = json.loads(record.result)
+                    except json.JSONDecodeError:
+                        result = record.result
+
+                analysis_tasks[record.id] = {
+                    'task_id': record.id,
+                    'novel_id': record.novel_id,
+                    'type': record.type,
+                    'status': status,
+                    'progress': {'progress_percent': record.progress or 0},
+                    'result': result,
+                    'error': record.error,
+                    'created_at': record.created_at.isoformat() if record.created_at else ''
+                }
+        db.commit()
+    except Exception as e:
+        logger.warning(f"恢复任务失败: {e}")
 
 
 class AnalysisStatusResponse(BaseModel):
@@ -48,6 +110,16 @@ def update_task_progress(task_id: str, progress: AnalysisProgress):
     if task_id in analysis_tasks:
         analysis_tasks[task_id]['progress'] = progress.to_dict()
         analysis_tasks[task_id]['status'] = progress.status
+        # 异步持久化（非阻塞）
+        try:
+            from app.models.database import SessionLocal
+            db = SessionLocal()
+            try:
+                _persist_task(task_id, db)
+            finally:
+                db.close()
+        except Exception:
+            pass
 
 
 async def run_character_analysis(
@@ -96,6 +168,7 @@ async def run_character_analysis(
         analysis_tasks[task_id]['status'] = 'completed'
         analysis_tasks[task_id]['progress']['status'] = 'completed'
         analysis_tasks[task_id]['progress']['progress_percent'] = 100
+        _persist_task(task_id, db)
 
         logger.info(f"人物分析任务完成: {task_id}, 识别 {len(result)} 个人物")
 
@@ -103,6 +176,7 @@ async def run_character_analysis(
         logger.error(f"人物分析任务失败: {task_id}, {e}")
         analysis_tasks[task_id]['status'] = 'failed'
         analysis_tasks[task_id]['error'] = str(e)
+        _persist_task(task_id, db)
 
 
 async def run_plot_analysis(
@@ -154,6 +228,7 @@ async def run_plot_analysis(
         analysis_tasks[task_id]['status'] = 'completed'
         analysis_tasks[task_id]['progress']['status'] = 'completed'
         analysis_tasks[task_id]['progress']['progress_percent'] = 100
+        _persist_task(task_id, db)
 
         logger.info(f"情节分析任务完成: {task_id}, 识别 {len(result)} 个情节")
 
@@ -161,6 +236,7 @@ async def run_plot_analysis(
         logger.error(f"情节分析任务失败: {task_id}, {e}")
         analysis_tasks[task_id]['status'] = 'failed'
         analysis_tasks[task_id]['error'] = str(e)
+        _persist_task(task_id, db)
 
 
 @router.post("/analyze/{novel_id}/async", response_model=AnalysisStartResponse)
@@ -201,6 +277,9 @@ async def start_async_analysis(
         'created_at': datetime.now().isoformat()
     }
 
+    # 持久化新任务
+    _persist_task(task_id, db)
+
     # 添加后台任务
     if analysis_type == 'character':
         background_tasks.add_task(run_character_analysis, task_id, novel_id, db)
@@ -217,7 +296,7 @@ async def start_async_analysis(
 
 
 @router.get("/status/{task_id}", response_model=AnalysisStatusResponse)
-async def get_analysis_status(task_id: str):
+async def get_analysis_status(task_id: str, db: Session = Depends(get_db)):
     """
     获取分析任务状态
 
@@ -227,8 +306,22 @@ async def get_analysis_status(task_id: str):
     Returns:
         任务状态和进度
     """
+    # 内存中查找，fallback 到数据库
     if task_id not in analysis_tasks:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        record = db.query(AnalysisTaskModel).filter(AnalysisTaskModel.id == task_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        # 恢复到内存
+        analysis_tasks[task_id] = {
+            'task_id': record.id,
+            'novel_id': record.novel_id,
+            'type': record.type,
+            'status': record.status,
+            'progress': {'progress_percent': record.progress or 0},
+            'result': json.loads(record.result) if record.result else None,
+            'error': record.error,
+            'created_at': record.created_at.isoformat() if record.created_at else ''
+        }
 
     task = analysis_tasks[task_id]
     progress = task.get('progress', {})
@@ -245,7 +338,7 @@ async def get_analysis_status(task_id: str):
 
 
 @router.get("/result/{task_id}")
-async def get_analysis_result(task_id: str):
+async def get_analysis_result(task_id: str, db: Session = Depends(get_db)):
     """
     获取分析任务结果
 
@@ -256,7 +349,27 @@ async def get_analysis_result(task_id: str):
         分析结果
     """
     if task_id not in analysis_tasks:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        # 尝试从数据库恢复
+        record = db.query(AnalysisTaskModel).filter(AnalysisTaskModel.id == task_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        # 恢复到内存
+        result_data = None
+        if record.result:
+            try:
+                result_data = json.loads(record.result)
+            except json.JSONDecodeError:
+                result_data = record.result
+        analysis_tasks[task_id] = {
+            'task_id': record.id,
+            'novel_id': record.novel_id,
+            'type': record.type,
+            'status': record.status,
+            'progress': {'progress_percent': record.progress or 0},
+            'result': result_data,
+            'error': record.error,
+            'created_at': record.created_at.isoformat() if record.created_at else ''
+        }
 
     task = analysis_tasks[task_id]
 

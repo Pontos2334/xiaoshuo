@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import files, characters, plots, inspiration, search, graph, chat, assistant, analysis
+from app.api import files, characters, plots, inspiration, search, graph, chat, assistant, analysis, chapters, worldbuilding, foreshadows, character_arcs, tension, outlines
 from app.models.database import engine, Base
 from app.core.logging_config import setup_logging
 from app.core.config import settings
@@ -48,6 +48,12 @@ app.include_router(graph.router, prefix="/api/graph", tags=["图谱"])
 app.include_router(chat.router, prefix="/api/chat", tags=["对话"])
 app.include_router(assistant.router, prefix="/api/assistant", tags=["智能助手"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["分析任务"])
+app.include_router(chapters.router, prefix="/api/chapters", tags=["章节"])
+app.include_router(worldbuilding.router, prefix="/api/worldbuilding", tags=["世界观"])
+app.include_router(foreshadows.router, prefix="/api/foreshadows", tags=["伏笔追踪"])
+app.include_router(character_arcs.router, prefix="/api/character-arcs", tags=["角色成长弧线"])
+app.include_router(tension.router, prefix="/api/tension", tags=["节奏张力"])
+app.include_router(outlines.router, prefix="/api/outlines", tags=["大纲管理"])
 
 
 @app.get("/")

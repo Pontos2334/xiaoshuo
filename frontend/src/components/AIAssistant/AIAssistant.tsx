@@ -18,6 +18,8 @@ import {
   Zap,
   Loader2,
   Wand2,
+  Lightbulb,
+  Flame,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +91,24 @@ const TABS: TabConfig[] = [
     contextPlaceholder: '描述当前的情节上下文...',
     resultKey: 'twist',
   },
+  {
+    key: 'writers-block',
+    label: '卡文急救',
+    icon: Lightbulb,
+    endpoint: '/assistant/writers-block-rescue',
+    hasContext: true,
+    contextPlaceholder: '描述你当前的写作困境...',
+    resultKey: 'suggestions',
+  },
+  {
+    key: 'satisfaction',
+    label: '爽点设计',
+    icon: Flame,
+    endpoint: '/assistant/satisfaction-designer',
+    hasContext: true,
+    contextPlaceholder: '描述你想要的爽点场景...',
+    resultKey: 'scenario',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,6 +166,7 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, string>>({});
   const [contexts, setContexts] = useState<Record<string, string>>({});
+  const [satisfactionType, setSatisfactionType] = useState<string>('打脸');
 
   // -------------------------------------------------------------------------
   // Generic generate handler
@@ -159,6 +180,9 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
         const body: any = { novel_id: novelId };
         if (tab.hasContext && contexts[tab.key]?.trim()) {
           body.context = contexts[tab.key].trim();
+        }
+        if (tab.key === 'satisfaction') {
+          body.type = satisfactionType;
         }
 
         const res = await fetch(`${API_URL}${tab.endpoint}`, {
@@ -182,7 +206,7 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
         setLoadingTab(null);
       }
     },
-    [novelId, contexts],
+    [novelId, contexts, satisfactionType],
   );
 
   // =========================================================================
@@ -206,7 +230,7 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
         <CardContent className="flex-1 flex flex-col overflow-hidden pt-0">
           <Tabs defaultValue="predict" className="flex-1 flex flex-col overflow-hidden">
             {/* Tab bar */}
-            <TabsList className="grid grid-cols-5 w-full shrink-0">
+            <TabsList className="grid grid-cols-7 w-full shrink-0">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -242,6 +266,23 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
                       rows={2}
                       className="text-sm shrink-0"
                     />
+                  )}
+
+                  {/* Satisfaction type selector */}
+                  {tab.key === 'satisfaction' && (
+                    <div className="flex gap-2 shrink-0">
+                      {['打脸', '逆袭', '装逼', '反转'].map((t) => (
+                        <Button
+                          key={t}
+                          variant={satisfactionType === t ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setSatisfactionType(t)}
+                          className="flex-1"
+                        >
+                          {t}
+                        </Button>
+                      ))}
+                    </div>
                   )}
 
                   {/* Generate button */}

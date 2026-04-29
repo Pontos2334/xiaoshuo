@@ -4,13 +4,17 @@
 提供情节预测、写作建议等智能功能
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+from sqlalchemy.orm import Session
 import logging
 
 from ..services.novel_assistant.plot_predictor import PlotPredictor
 from ..services.novel_assistant.writing_advisor import WritingAdvisor
+from ..services.creative_helper import CreativeHelper
+from ..models.database import get_db
+from ..models.models import Novel, Character, PlotNode
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 logger = logging.getLogger(__name__)
@@ -162,4 +166,91 @@ async def suggest_twist(request: TwistRequest):
         return result
     except Exception as e:
         logger.error(f"转折建议失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class WritersBlockRequest(BaseModel):
+    """卡文急救请求"""
+    novel_id: str
+    context: str = ""
+    dilemma: str = ""
+
+
+class SatisfactionDesignRequest(BaseModel):
+    """爽点设计请求"""
+    novel_id: str
+    type: str = "打脸"  # 打脸/逆袭/装逼/反转
+    context: str = ""
+
+
+@router.post("/writers-block-rescue")
+async def writers_block_rescue(request: WritersBlockRequest, db: Session = Depends(get_db)):
+    """卡文急救 - 基于当前上下文提供突破建议"""
+    try:
+        novel = db.query(Novel).filter(Novel.id == request.novel_id).first()
+        if not novel:
+            raise HTTPException(status_code=404, detail="小说不存在")
+
+        characters = db.query(Character).filter(Character.novel_id == request.novel_id).all()
+        plots = db.query(PlotNode).filter(PlotNode.novel_id == request.novel_id).all()
+
+        characters_info = "\n".join([
+            f"- {c.name}: {c.story_summary or '无简介'}" for c in characters[:20]
+        ])
+        plots_info = "\n".join([
+            f"- 第{p.chapter}章 {p.title}: {p.summary or ''}" for p in plots[:20]
+        ])
+
+        current_context = request.context or ""
+        if not current_context and novel.content_path:
+            from app.core.file_utils import safe_read_file
+            full_content = safe_read_file(novel.content_path)
+            current_context = full_content[-3000:] if full_content else ""
+
+        helper = CreativeHelper()
+        result = await helper.writers_block_rescue(
+            current_context=current_context,
+            characters_info=characters_info,
+            plots_info=plots_info,
+            dilemma=request.dilemma
+        )
+
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"卡文急救失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/satisfaction-designer")
+async def satisfaction_designer(request: SatisfactionDesignRequest, db: Session = Depends(get_db)):
+    """爽点设计器 - 设计打脸/逆袭/装逼/反转等爽点场景"""
+    valid_types = {"打脸", "逆袭", "装逼", "反转"}
+    if request.type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"类型必须是: {', '.join(valid_types)}")
+
+    try:
+        novel = db.query(Novel).filter(Novel.id == request.novel_id).first()
+        if not novel:
+            raise HTTPException(status_code=404, detail="小说不存在")
+
+        characters = db.query(Character).filter(Character.novel_id == request.novel_id).all()
+
+        characters_info = "\n".join([
+            f"- {c.name}: {c.story_summary or '无简介'}, 性格: {', '.join(c.personality or [])[:50]}" for c in characters[:20]
+        ])
+
+        helper = CreativeHelper()
+        result = await helper.satisfaction_designer(
+            satisfaction_type=request.type,
+            characters_info=characters_info,
+            context=request.context
+        )
+
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"爽点设计失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

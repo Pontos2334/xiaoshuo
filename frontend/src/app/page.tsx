@@ -12,6 +12,11 @@ const KnowledgeGraph = lazy(() => import('@/components/KnowledgeGraph/KnowledgeG
 const CharacterChat = lazy(() => import('@/components/CharacterChat/CharacterChat').then(m => ({ default: m.CharacterChat })));
 const AIAssistant = lazy(() => import('@/components/AIAssistant/AIAssistant').then(m => ({ default: m.AIAssistant })));
 const WorldBuildingComp = lazy(() => import('@/components/WorldBuilding/WorldBuilding').then(m => ({ default: m.WorldBuilding })));
+const ForeshadowTrackerComp = lazy(() => import('@/components/ForeshadowTracker/ForeshadowTracker').then(m => ({ default: m.ForeshadowTracker })));
+const CharacterArcComp = lazy(() => import('@/components/CharacterArc/CharacterArc').then(m => ({ default: m.CharacterArc })));
+const TensionCurveComp = lazy(() => import('@/components/TensionCurve/TensionCurve').then(m => ({ default: m.TensionCurve })));
+const OutlineWorkflowComp = lazy(() => import('@/components/OutlineWorkflow/OutlineWorkflow').then(m => ({ default: m.OutlineWorkflow })));
+const CharacterQuickSearchComp = lazy(() => import('@/components/CharacterQuickSearch/CharacterQuickSearch').then(m => ({ default: m.CharacterQuickSearch })));
 
 import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNovelStore } from '@/stores';
 import { API_URL } from '@/lib/constants';
@@ -48,6 +53,19 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [analyzeMode, setAnalyzeMode] = useState<AnalyzeMode>('incremental');
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+
+  // Ctrl+K 快捷键监听
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setQuickSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // 当选择小说时，从后端加载已保存的数据 - 使用 AbortController 防止竞态条件
   useEffect(() => {
@@ -366,6 +384,27 @@ export default function Home() {
           <WorldBuildingComp />
         </Suspense>
       )}
+      {activeTab === 'foreshadow' && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+          <ForeshadowTrackerComp />
+        </Suspense>
+      )}
+      {activeTab === 'arcs' && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+          <CharacterArcComp />
+        </Suspense>
+      )}
+      {activeTab === 'tension' && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+          <TensionCurveComp />
+        </Suspense>
+      )}
+      {activeTab === 'outline' && (
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+          <OutlineWorkflowComp />
+        </Suspense>
+      )}
+      <CharacterQuickSearchComp open={quickSearchOpen} onOpenChange={setQuickSearchOpen} />
     </MainLayout>
   );
 }

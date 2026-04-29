@@ -1,7 +1,7 @@
 """
 人物对话引擎
 
-处理用户与小说人物的对话交互
+处理用户与小说人物的对话交互，支持 SQLite 持久化
 """
 
 import json
@@ -16,6 +16,84 @@ from app.core.config import settings
 from .character_profile_generator import CharacterProfile, CharacterProfileGenerator
 
 logger = logging.getLogger(__name__)
+
+
+def _get_db_session():
+    """获取数据库会话"""
+    from app.models.database import SessionLocal
+    return SessionLocal()
+
+
+def _persist_session(session: "ChatSession", novel_id: str):
+    """将会话持久化到数据库"""
+    try:
+        from app.models.models import ChatSession as ChatSessionModel
+        db = _get_db_session()
+        try:
+            record = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session.session_id
+            ).first()
+            messages_json = json.dumps(session.messages, ensure_ascii=False)
+
+            if record:
+                record.messages = messages_json
+                record.last_active = datetime.utcnow()
+            else:
+                record = ChatSessionModel(
+                    id=session.session_id,
+                    novel_id=novel_id,
+                    character_id=session.profile.character_id,
+                    character_name=session.profile.name,
+                    messages=messages_json
+                )
+                db.add(record)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"持久化会话失败: {e}")
+
+
+def _load_session_from_db(session_id: str) -> Optional[Dict[str, Any]]:
+    """从数据库加载会话"""
+    try:
+        from app.models.models import ChatSession as ChatSessionModel
+        db = _get_db_session()
+        try:
+            record = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id
+            ).first()
+            if record:
+                return {
+                    "id": record.id,
+                    "novel_id": record.novel_id,
+                    "character_id": record.character_id,
+                    "character_name": record.character_name,
+                    "messages": json.loads(record.messages) if record.messages else [],
+                    "created_at": record.created_at,
+                    "last_active": record.last_active
+                }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"加载会话失败: {e}")
+    return None
+
+
+def _delete_session_from_db(session_id: str):
+    """从数据库删除会话"""
+    try:
+        from app.models.models import ChatSession as ChatSessionModel
+        db = _get_db_session()
+        try:
+            db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id
+            ).delete()
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"删除会话记录失败: {e}")
 
 
 class ChatSession:
@@ -152,7 +230,8 @@ class CharacterChatEngine:
         character_id: str,
         character_data: Dict[str, Any],
         novel_context: str = "",
-        relations: List[Dict[str, Any]] = None
+        relations: List[Dict[str, Any]] = None,
+        novel_id: str = ""
     ) -> ChatSession:
         """
         创建对话会话
@@ -162,6 +241,7 @@ class CharacterChatEngine:
             character_data: 人物数据
             novel_context: 小说上下文
             relations: 人物关系
+            novel_id: 小说ID（用于持久化）
 
         Returns:
             对话会话
@@ -196,15 +276,37 @@ class CharacterChatEngine:
             self.profiles[character_id] = profile
 
         session = ChatSession(session_id, profile)
+        session._novel_id = novel_id  # 存储小说ID用于持久化
         self.sessions[session_id] = session
+
+        # 持久化到数据库
+        if novel_id:
+            _persist_session(session, novel_id)
 
         logger.info(f"创建对话会话: session_id={session_id}, character={profile.name}")
 
         return session
 
     def get_session(self, session_id: str) -> Optional[ChatSession]:
-        """获取会话"""
-        return self.sessions.get(session_id)
+        """获取会话（内存优先，fallback 到数据库）"""
+        session = self.sessions.get(session_id)
+        if session:
+            return session
+
+        # 尝试从数据库恢复
+        db_data = _load_session_from_db(session_id)
+        if db_data:
+            # 需要重新生成 profile
+            character_id = db_data.get("character_id")
+            if character_id and character_id in self.profiles:
+                profile = self.profiles[character_id]
+                session = ChatSession(session_id, profile)
+                session.messages = db_data.get("messages", [])
+                session._novel_id = db_data.get("novel_id", "")
+                self.sessions[session_id] = session
+                return session
+
+        return None
 
     def chat(
         self,
@@ -272,6 +374,10 @@ class CharacterChatEngine:
             # 添加助手回复
             session.add_message("assistant", response_text)
 
+            # 持久化到数据库
+            if hasattr(session, '_novel_id') and session._novel_id:
+                _persist_session(session, session._novel_id)
+
             # 分析情绪（简单关键词检测）
             emotion = self._detect_emotion(response_text)
 
@@ -307,20 +413,25 @@ class CharacterChatEngine:
         return "neutral"
 
     def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
-        """获取对话历史"""
+        """获取对话历史（内存优先，fallback 到数据库）"""
         session = self.sessions.get(session_id)
-        if not session:
-            return []
+        if session:
+            return session.messages
 
-        return session.messages
+        # 尝试从数据库加载
+        db_data = _load_session_from_db(session_id)
+        if db_data:
+            return db_data.get("messages", [])
+
+        return []
 
     def close_session(self, session_id: str) -> bool:
-        """关闭会话"""
+        """关闭会话（同时删除数据库记录）"""
         if session_id in self.sessions:
             del self.sessions[session_id]
-            logger.info(f"关闭会话: session_id={session_id}")
-            return True
-        return False
+        _delete_session_from_db(session_id)
+        logger.info(f"关闭会话: session_id={session_id}")
+        return True
 
     def list_sessions(self) -> List[Dict[str, Any]]:
         """列出所有会话"""

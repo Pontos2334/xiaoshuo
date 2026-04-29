@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, JSON, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Text, JSON, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.models.database import Base
@@ -31,6 +31,14 @@ class Novel(Base):
     # 关系
     characters = relationship("Character", back_populates="novel", cascade="all, delete-orphan")
     plot_nodes = relationship("PlotNode", back_populates="novel", cascade="all, delete-orphan")
+    chapters = relationship("Chapter", back_populates="novel", cascade="all, delete-orphan")
+    chat_sessions = relationship("ChatSession", back_populates="novel", cascade="all, delete-orphan")
+    analysis_tasks = relationship("AnalysisTask", back_populates="novel", cascade="all, delete-orphan")
+    world_entities = relationship("WorldEntity", back_populates="novel", cascade="all, delete-orphan")
+    foreshadows = relationship("Foreshadow", back_populates="novel", cascade="all, delete-orphan")
+    arc_points = relationship("CharacterArcPoint", back_populates="novel", cascade="all, delete-orphan")
+    tension_points = relationship("TensionPoint", back_populates="novel", cascade="all, delete-orphan")
+    outline_nodes = relationship("OutlineNode", back_populates="novel", cascade="all, delete-orphan")
 
 
 class Character(Base):
@@ -56,6 +64,7 @@ class Character(Base):
 
     # 关系
     novel = relationship("Novel", back_populates="characters")
+    arc_points = relationship("CharacterArcPoint", back_populates="character", cascade="all, delete-orphan")
     source_relations = relationship(
         "CharacterRelation",
         foreign_keys="CharacterRelation.source_id",
@@ -166,3 +175,204 @@ class Inspiration(Base):
     target_id = Column(String)  # 关联的情节/人物ID
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Chapter(Base):
+    """章节模型"""
+    __tablename__ = "chapters"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    title = Column(String)
+    content = Column(Text)
+    word_count = Column(Integer, default=0)
+    status = Column(String, default="draft")  # draft / completed / revised
+    summary = Column(Text)  # AI生成的章节摘要
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    novel = relationship("Novel", back_populates="chapters")
+
+
+class ChatSession(Base):
+    """对话会话模型 - 持久化人物对话历史"""
+    __tablename__ = "chat_sessions"
+
+    id = Column(String, primary_key=True)  # UUID
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    character_name = Column(String)  # 冗余存储，方便查询
+    messages = Column(Text, default="[]")  # JSON array
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_active = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    novel = relationship("Novel", back_populates="chat_sessions")
+
+
+class AnalysisTask(Base):
+    """分析任务模型 - 持久化异步分析任务状态"""
+    __tablename__ = "analysis_tasks"
+
+    id = Column(String, primary_key=True)  # UUID
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    type = Column(String, nullable=False)  # character / plot / graph
+    status = Column(String, default="started")  # started / in_progress / completed / failed / cancelled
+    progress = Column(Float, default=0)
+    result = Column(Text)  # JSON
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 关系
+    novel = relationship("Novel", back_populates="analysis_tasks")
+
+
+class WorldEntity(Base):
+    """世界观实体模型"""
+    __tablename__ = "world_entities"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    name = Column(String, nullable=False)
+    entity_type = Column(String, nullable=False)  # location / item / organization / event / concept / terminology
+    description = Column(Text)
+    attributes = Column(JSON, default=dict)  # 自定义属性键值对
+    rules = Column(Text)  # 规则/约束
+    source = Column(String, default="ai")  # ai / manual
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    novel = relationship("Novel", back_populates="world_entities")
+    source_relations = relationship(
+        "EntityRelation",
+        foreign_keys="EntityRelation.source_id",
+        back_populates="source_entity",
+        cascade="all, delete-orphan"
+    )
+    target_relations = relationship(
+        "EntityRelation",
+        foreign_keys="EntityRelation.target_id",
+        back_populates="target_entity",
+        cascade="all, delete-orphan"
+    )
+
+
+class EntityRelation(Base):
+    """世界观实体关系模型"""
+    __tablename__ = "entity_relations"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    source_id = Column(String, ForeignKey("world_entities.id"), nullable=False)
+    target_id = Column(String, ForeignKey("world_entities.id"), nullable=False)
+    relation_type = Column(String, nullable=False)
+    description = Column(Text)
+
+    # 关系
+    source_entity = relationship(
+        "WorldEntity",
+        foreign_keys=[source_id],
+        back_populates="source_relations"
+    )
+    target_entity = relationship(
+        "WorldEntity",
+        foreign_keys=[target_id],
+        back_populates="target_relations"
+    )
+
+
+class Foreshadow(Base):
+    """伏笔追踪模型"""
+    __tablename__ = "foreshadows"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    plant_chapter = Column(Integer, nullable=False)
+    plant_description = Column(Text)
+    status = Column(String, default="planted")  # planted / partially_revealed / resolved / abandoned
+    resolve_chapter = Column(Integer, nullable=True)
+    resolve_description = Column(Text, nullable=True)
+    related_characters = Column(JSON, default=list)
+    related_plots = Column(JSON, default=list)
+    importance = Column(Integer, default=5)  # 1-10
+    source = Column(String, default="ai")  # ai / user
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    novel = relationship("Novel", back_populates="foreshadows")
+
+
+class CharacterArcPoint(Base):
+    """角色成长弧线模型"""
+    __tablename__ = "character_arc_points"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    psychological_state = Column(String)  # 心理状态
+    emotional_state = Column(String)  # 情感状态
+    ability_description = Column(String)  # 能力描述
+    ability_level = Column(Integer, nullable=True)  # 能力等级 1-10
+    relationship_changes = Column(JSON, default=list)  # [{target_id, change}]
+    key_events = Column(JSON, default=list)  # [string]
+    growth_notes = Column(Text)
+    source = Column(String, default="ai")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    character = relationship("Character", back_populates="arc_points")
+    novel = relationship("Novel", back_populates="arc_points")
+
+
+class TensionPoint(Base):
+    """节奏张力点模型"""
+    __tablename__ = "tension_points"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    tension_level = Column(Integer, default=5)  # 1-10
+    emotion_tags = Column(JSON, default=list)  # [string]
+    key_events_summary = Column(Text)
+    pacing_note = Column(Text)
+    reader_hook_score = Column(Integer, nullable=True)  # 1-10 前3章
+    cliffhanger_score = Column(Integer, nullable=True)  # 1-10
+    source = Column(String, default="ai")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    novel = relationship("Novel", back_populates="tension_points")
+
+
+class OutlineNode(Base):
+    """大纲节点模型（自引用树形结构）"""
+    __tablename__ = "outline_nodes"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    novel_id = Column(String, ForeignKey("novels.id"), nullable=False)
+    parent_id = Column(String, ForeignKey("outline_nodes.id"), nullable=True)
+    level = Column(Integer, nullable=False)  # 0=总纲, 1=卷, 2=章节
+    title = Column(String, nullable=False)
+    content = Column(Text)
+    chapter_range = Column(String, nullable=True)  # "第1-10章"
+    status = Column(String, default="draft")  # draft / completed / active
+    sort_order = Column(Integer, default=0)
+    ai_context = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    novel = relationship("Novel", back_populates="outline_nodes")
+    children = relationship("OutlineNode", back_populates="parent", cascade="all, delete-orphan")
+    parent = relationship("OutlineNode", back_populates="children", remote_side=[id])

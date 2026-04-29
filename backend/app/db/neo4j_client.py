@@ -59,6 +59,26 @@ class Neo4jClient:
             record = result.single()
             return dict(record) if record else None
 
+    def execute_query(self, query: str, parameters: dict = None):
+        """执行 Cypher 查询（run 的别名，兼容不同调用方式）"""
+        return self.run(query, parameters)
+
+    def is_available(self) -> bool:
+        """检查 Neo4j 是否可用"""
+        if not self.driver:
+            return False
+        try:
+            with self.driver.session() as session:
+                session.run("RETURN 1").single()
+            return True
+        except Exception:
+            return False
+
 
 # 全局客户端实例
 neo4j_client = Neo4jClient.get_instance()
+
+
+def get_neo4j_client() -> Neo4jClient:
+    """获取 Neo4j 客户端实例（兼容函数）"""
+    return neo4j_client
