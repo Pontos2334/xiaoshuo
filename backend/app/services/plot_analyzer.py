@@ -11,7 +11,7 @@ MAX_OUTLINE_LENGTH = 8000
 
 # Map-Reduce 配置
 LONG_TEXT_THRESHOLD = 20000  # 触发 Map-Reduce 的字符阈值
-CHUNK_SIZE_PLOT = 4000       # 情节分析块大小
+CHUNK_SIZE_PLOT = 10000      # 情节分析块大小
 MAX_CONCURRENT_TASKS = 2     # 最大并发任务数（情节分析较复杂）
 
 

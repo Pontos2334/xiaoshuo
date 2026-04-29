@@ -91,6 +91,7 @@ export function WorldBuilding() {
         }
       } catch (e) {
         console.error('加载世界观实体失败:', e);
+        toast.error('加载世界观实体失败');
       } finally {
         setIsLoading(false);
       }
@@ -110,6 +111,7 @@ export function WorldBuilding() {
         }
       } catch (e) {
         console.error('加载实体关系失败:', e);
+        toast.error('加载实体关系失败');
       }
     };
     loadRelations();

@@ -7,7 +7,7 @@
 import os
 from typing import List
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, ConfigDict
 
 
 class Settings(BaseSettings):
@@ -31,15 +31,19 @@ class Settings(BaseSettings):
     # Qdrant 配置
     QDRANT_URL: str = "http://localhost:6333"
 
-    # AI 配置
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
-    CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    # AI 配置 (DeepSeek)
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-chat"
     MAX_TOKENS: int = 4096
+    DEEPSEEK_REASONING_EFFORT: str = "max"  # 思考强度: high / max（默认 max 最强思考）
 
     # Embedding 配置
     EMBEDDING_USE_LOCAL: bool = False
     EMBEDDING_LOCAL_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
+
+    # CORS 额外允许的源（逗号分隔，用于 Docker/生产部署）
+    CORS_ORIGINS: str = ""
 
     # GraphRAG 配置
     GRAPH_RAG_MAX_GLEANINGS: int = 1
@@ -69,12 +73,18 @@ class Settings(BaseSettings):
         ]
         if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
             origins.append(self.FRONTEND_URL)
+        if self.CORS_ORIGINS:
+            for origin in self.CORS_ORIGINS.split(","):
+                origin = origin.strip()
+                if origin and origin not in origins:
+                    origins.append(origin)
         return origins
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 # 全局配置实例

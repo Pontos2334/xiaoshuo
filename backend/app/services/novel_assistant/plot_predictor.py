@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
-from anthropic import Anthropic
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -41,12 +41,12 @@ class PlotPredictor:
     """
 
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
-        self.model = model or settings.CLAUDE_MODEL
+        self.api_key = api_key or settings.DEEPSEEK_API_KEY
+        self.base_url = base_url or settings.DEEPSEEK_BASE_URL
+        self.model = model or settings.DEEPSEEK_MODEL
 
         if self.api_key:
-            self.client = Anthropic(
+            self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
@@ -90,13 +90,13 @@ class PlotPredictor:
         )
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=3000,
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            content = response.content[0].text
+            content = response.choices[0].message.content
             return self._parse_response(content, prediction_type)
 
         except Exception as e:

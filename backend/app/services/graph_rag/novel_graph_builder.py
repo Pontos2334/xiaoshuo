@@ -309,7 +309,9 @@ class NovelGraphBuilder:
 
         # 统计关系数量
         relation_query = """
-        MATCH ()-[r]-({novel_id: $novel_id})
+        MATCH (n)-[r]-(m)
+        WHERE n.novel_id = $novel_id AND m.novel_id = $novel_id
+          AND elementId(n) < elementId(m)
         RETURN type(r) as type, count(r) as count
         """
         try:

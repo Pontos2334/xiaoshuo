@@ -66,8 +66,14 @@ export function CharacterChat({ novelId, novelName }: CharacterChatProps) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            novel_id: novelId,
             character_id: characterId,
+            character_data: {
+              name: selectedCharacter?.name,
+              personality: selectedCharacter?.personality ?? [],
+              abilities: selectedCharacter?.abilities ?? [],
+              basic_info: selectedCharacter?.basicInfo ?? {},
+              story_summary: selectedCharacter?.storySummary ?? '',
+            },
           }),
         });
 

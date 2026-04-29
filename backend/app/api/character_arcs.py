@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 import json
-import re
 
 from app.models.database import get_db
 from app.models.models import Novel, Character, CharacterArcPoint
@@ -14,6 +13,7 @@ from app.models.schemas import (
     ApiResponse
 )
 from app.core.file_utils import safe_read_file
+from app.core.json_utils import JSONParser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -196,7 +196,7 @@ async def extract_arc_points(
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "arc_points" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -330,7 +330,7 @@ async def detect_arc_inconsistencies(
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         inconsistencies = data.get("inconsistencies", []) if data else []
 
         return ApiResponse(
@@ -404,14 +404,3 @@ async def get_growth_curve(character_id: str, db: Session = Depends(get_db)):
         }
     )
 
-
-def _parse_json_response(text: str) -> Optional[dict]:
-    """解析AI返回的JSON，支持```json包裹"""
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return None

@@ -12,7 +12,7 @@ import logging
 from ..services.character_chat.character_chat_engine import get_chat_engine
 from ..services.character_chat.character_profile_generator import CharacterProfileGenerator
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
 
 

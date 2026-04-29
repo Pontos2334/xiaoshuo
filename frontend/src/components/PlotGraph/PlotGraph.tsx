@@ -83,12 +83,14 @@ export function PlotGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental',
       extractChapterNumber(a.chapter) - extractChapterNumber(b.chapter)
     );
 
-    const nodes: Node[] = sortedNodes.map((node) => ({
-      id: node.id,
-      type: 'plotNode',
-      position: { x: 0, y: 0 },
-      data: node,
-    }));
+    const nodes: Node[] = sortedNodes
+      .filter((node) => node.id)
+      .map((node) => ({
+        id: node.id,
+        type: 'plotNode',
+        position: { x: 0, y: 0 },
+        data: node,
+      }));
 
     const connectionStyles: Record<string, { stroke: string; label: string }> = {
       'cause': { stroke: '#ef4444', label: '因果' },
@@ -183,15 +185,16 @@ export function PlotGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental',
 
   const handleSaveEdit = useCallback(async () => {
     if (!editingPlot) return;
-    updatePlotNode(editingPlot.id, editingPlot);
+    const plotToSave = { ...editingPlot };
     setEditDialogOpen(false);
     setEditingPlot(null);
     try {
-      await fetch(`${API_URL}/plots/${editingPlot.id}`, {
+      await fetch(`${API_URL}/plots/${plotToSave.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingPlot),
+        body: JSON.stringify(plotToSave),
       });
+      updatePlotNode(plotToSave.id, plotToSave);
     } catch (error) {
       console.error('保存情节失败:', error);
       toast.error('保存到后端失败');
@@ -201,10 +204,10 @@ export function PlotGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental',
   const handleDelete = useCallback(
     async (id: string) => {
       if (!confirm('确定要删除这个情节节点吗？')) return;
-      deletePlotNode(id);
-      setSelectedPlotNode(null);
       try {
         await fetch(`${API_URL}/plots/${id}`, { method: 'DELETE' });
+        deletePlotNode(id);
+        setSelectedPlotNode(null);
       } catch (error) {
         console.error('删除情节失败:', error);
         toast.error('从后端删除失败');

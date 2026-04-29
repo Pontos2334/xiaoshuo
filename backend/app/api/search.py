@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 
 from ..services.vector.qdrant_service import get_qdrant_service
 
-router = APIRouter(prefix="/search", tags=["search"])
+router = APIRouter(tags=["search"])
 
 
 class SemanticSearchRequest(BaseModel):

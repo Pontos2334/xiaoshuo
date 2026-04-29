@@ -273,7 +273,7 @@ export function CharacterArc() {
       setIsLoading(true);
       try {
         const res = await fetch(
-          `${API_URL}/arcs/?novel_id=${currentNovel.id}&character_id=${characterId}`
+          `${API_URL}/character-arcs/?novel_id=${currentNovel.id}&character_id=${characterId}`
         );
         if (res.ok) {
           const data: CharacterArcPoint[] = await res.json();
@@ -294,7 +294,7 @@ export function CharacterArc() {
   const loadGrowthCurve = useCallback(async (characterId: string) => {
     if (!characterId) return;
     try {
-      const res = await fetch(`${API_URL}/arcs/growth-curve?character_id=${characterId}`);
+      const res = await fetch(`${API_URL}/character-arcs/growth-curve?character_id=${characterId}`);
       if (res.ok) {
         const data = await res.json();
         // Expect {chapter: level} pairs
@@ -336,7 +336,7 @@ export function CharacterArc() {
     setIsExtracting(true);
     try {
       const res = await fetch(
-        `${API_URL}/arcs/extract?novel_id=${currentNovel.id}&character_id=${selectedCharacterId}`,
+        `${API_URL}/character-arcs/extract?novel_id=${currentNovel.id}&character_id=${selectedCharacterId}`,
         { method: 'POST' }
       );
       const data = await res.json();
@@ -366,7 +366,7 @@ export function CharacterArc() {
     setInconsistencies([]);
     try {
       const res = await fetch(
-        `${API_URL}/arcs/inconsistencies?novel_id=${currentNovel.id}&character_id=${selectedCharacterId}`,
+        `${API_URL}/character-arcs/inconsistencies?novel_id=${currentNovel.id}&character_id=${selectedCharacterId}`,
         { method: 'POST' }
       );
       const data = await res.json();

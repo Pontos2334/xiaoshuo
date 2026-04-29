@@ -1,9 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 from datetime import datetime
 import logging
 import re
+import json
+import asyncio
 
 from app.models.database import get_db
 from app.models.models import Character, CharacterRelation, Novel
@@ -169,16 +172,24 @@ async def analyze_relations(novel_id: str, db: Session = Depends(get_db)):
     try:
         all_relations = character_relation_repo.get_by_novel(novel_id)
         if not all_relations:
-            # Neo4j 没有数据，从 SQLite 获取
-            all_relations = db.query(CharacterRelation).filter(
+            # Neo4j 没有数据，从 SQLite 获取并转换为可序列化格式
+            sqlite_relations = db.query(CharacterRelation).filter(
                 CharacterRelation.novel_id == novel_id
             ).all()
+            all_relations = [
+                CharacterRelationResponse.model_validate(r).model_dump(by_alias=True)
+                for r in sqlite_relations
+            ]
             logger.info(f"从 SQLite 获取到 {len(all_relations)} 个关系用于返回")
     except Exception as e:
         logger.warning(f"从 Neo4j 获取关系失败: {e}，回退到 SQLite")
-        all_relations = db.query(CharacterRelation).filter(
+        sqlite_relations = db.query(CharacterRelation).filter(
             CharacterRelation.novel_id == novel_id
         ).all()
+        all_relations = [
+            CharacterRelationResponse.model_validate(r).model_dump(by_alias=True)
+            for r in sqlite_relations
+        ]
 
     return ApiResponse(
         success=True,
@@ -282,7 +293,11 @@ async def analyze_characters(
     # 获取当前分析版本
     current_version = (novel.analysis_version or 0) + 1
 
-    analyzer = CharacterAnalyzer()
+    try:
+        analyzer = CharacterAnalyzer()
+    except Exception as e:
+        logger.exception(f"初始化 CharacterAnalyzer 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"初始化分析器失败: {str(e)}")
 
     # 根据模式选择分析方法
     if mode == 'incremental' and novel.last_analyzed_chapter and novel.last_analyzed_chapter > 0:
@@ -555,6 +570,217 @@ async def analyze_characters(
             'version': current_version,
         }
     )
+
+
+@router.post("/analyze/stream")
+async def analyze_characters_stream(
+    novel_id: str,
+    mode: str = Query('full', description="分析模式: full(全量) | incremental(增量)"),
+    db: Session = Depends(get_db)
+):
+    """SSE 流式 AI 分析小说人物，实时推送进度"""
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(status_code=404, detail="小说不存在")
+
+    content = ""
+    if novel.content_path:
+        content = safe_read_file(novel.content_path)
+
+    if not content:
+        raise HTTPException(status_code=400, detail="小说内容为空")
+
+    current_version = (novel.analysis_version or 0) + 1
+    last_analyzed_chapter = novel.last_analyzed_chapter or 0
+    analyzer = CharacterAnalyzer()
+
+    # 用于取消任务的标志
+    cancel_event = asyncio.Event()
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        progress_queue = asyncio.Queue()
+
+        def progress_callback(progress):
+            try:
+                progress_queue.put_nowait(progress.to_dict() if hasattr(progress, 'to_dict') else progress)
+            except asyncio.QueueFull:
+                pass
+
+        # 后台运行分析任务（传递基本数据，不传 db session 或 ORM 对象）
+        analysis_task = asyncio.create_task(_run_analysis(
+            analyzer, content, novel_id, mode, current_version,
+            last_analyzed_chapter, progress_callback, cancel_event
+        ))
+
+        # 发送初始事件
+        yield f"data: {json.dumps({'step': 'start', 'message': '开始分析...', 'mode': mode})}\n\n"
+
+        # 持续推送进度
+        while not analysis_task.done():
+            try:
+                progress_data = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
+                yield f"data: {json.dumps({'step': 'progress', **progress_data})}\n\n"
+            except asyncio.TimeoutError:
+                # 心跳
+                yield ": heartbeat\n\n"
+                continue
+
+        # 获取最终结果
+        try:
+            result = analysis_task.result()
+            yield f"data: {json.dumps({'step': 'complete', 'data': result})}\n\n"
+        except Exception as e:
+            logger.error(f"分析失败: {e}")
+            yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+
+    async def cleanup():
+        """客户端断开时取消分析"""
+        cancel_event.set()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+        background=cleanup
+    )
+
+
+async def _run_analysis(
+    analyzer: CharacterAnalyzer,
+    content: str,
+    novel_id: str,
+    mode: str,
+    current_version: int,
+    last_analyzed_chapter: int,
+    progress_callback,
+    cancel_event: asyncio.Event
+) -> dict:
+    """执行实际的分析逻辑（使用独立 DB session）"""
+    from app.models.database import SessionLocal
+    import re
+    from app.services.chapter_splitter import chapter_splitter
+    from app.models.models import Character, CharacterRelation
+
+    with SessionLocal() as db:
+        novel = db.query(Novel).filter(Novel.id == novel_id).first()
+        if not novel:
+            raise RuntimeError(f"小说不存在: {novel_id}")
+
+        if mode == 'incremental' and last_analyzed_chapter > 0:
+            # 增量模式
+            existing_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
+            existing_chars_data = []
+            for c in existing_characters:
+                existing_chars_data.append({
+                    'id': c.id, 'name': c.name, 'aliases': c.aliases or [],
+                    'basic_info': c.basic_info or {}, 'personality': c.personality or [],
+                    'abilities': c.abilities or [], 'story_summary': c.story_summary,
+                    'first_appear': c.first_appear, 'source': c.source or 'ai',
+                    'ai_version': c.ai_version or 1,
+                })
+            characters = await analyzer.analyze_incremental(
+                content, existing_chars_data,
+                last_analyzed_chapter + 1, current_version,
+                progress_callback=progress_callback
+            )
+            new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+        else:
+            # 全量模式 - 清理旧数据
+            # 清理 Neo4j
+            try:
+                old_neo4j_chars = character_repo.get_by_novel(novel_id) or []
+                for old_char in old_neo4j_chars:
+                    try:
+                        character_repo.delete(old_char.get('id'))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            db.query(CharacterRelation).filter(CharacterRelation.novel_id == novel_id).delete()
+            db.query(Character).filter(Character.novel_id == novel_id).delete()
+            db.commit()
+
+            raw_characters = await analyzer.analyze(content, progress_callback=progress_callback)
+
+            # 去重合并
+            characters = []
+            seen_names = {}
+            for char in raw_characters:
+                name = char.get('name', '')
+                if not name:
+                    continue
+                normalized_name = re.sub(r'\s+', '', name.strip())
+                normalized_name = re.sub(r'[（(][^）)]*[）)]', '', normalized_name).strip()
+                if normalized_name in seen_names:
+                    existing = seen_names[normalized_name]
+                    for alias in char.get('aliases', []):
+                        if alias not in existing.get('aliases', []):
+                            existing['aliases'].append(alias)
+                    for p in char.get('personality', []):
+                        if p not in existing.get('personality', []):
+                            existing['personality'].append(p)
+                    for a in char.get('abilities', []):
+                        if a not in existing.get('abilities', []):
+                            existing['abilities'].append(a)
+                else:
+                    char['source'] = 'ai'
+                    char['ai_version'] = current_version
+                    characters.append(char)
+                    seen_names[normalized_name] = char
+
+            new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+
+        # 保存到数据库
+        for char_data in characters:
+            try:
+                neo4j_data = {k: v for k, v in char_data.items() if k not in ['id', 'source', 'ai_version']}
+                result = character_repo.create(novel_id, neo4j_data)
+                if result:
+                    char_data['id'] = result.get('id')
+            except Exception as e:
+                logger.error(f"保存人物到 Neo4j 失败: {e}")
+
+        for char_data in characters:
+            char_id = char_data.get('id')
+            if char_id:
+                existing = db.query(Character).filter(Character.id == char_id).first()
+                if existing:
+                    for key, value in char_data.items():
+                        if key not in ['id', 'source', 'ai_version']:
+                            setattr(existing, key, value)
+                    existing.source = char_data.get('source', 'ai')
+                    existing.ai_version = char_data.get('ai_version', current_version)
+                else:
+                    new_char = Character(
+                        novel_id=novel_id, name=char_data.get('name', ''),
+                        aliases=char_data.get('aliases', []),
+                        basic_info=char_data.get('basic_info', {}),
+                        personality=char_data.get('personality', []),
+                        abilities=char_data.get('abilities', []),
+                        story_summary=char_data.get('story_summary'),
+                        first_appear=char_data.get('first_appear'),
+                        source=char_data.get('source', 'ai'),
+                        ai_version=char_data.get('ai_version', current_version),
+                    )
+                    db.add(new_char)
+                    db.flush()
+                    char_data['id'] = new_char.id
+
+        novel.last_analyzed_chapter = new_max_chapter
+        novel.analysis_version = current_version
+        db.commit()
+
+    return {
+        'characters': characters,
+        'mode': mode,
+        'analyzed_chapter': new_max_chapter,
+        'version': current_version,
+    }
 
 
 @router.get("/{character_id}", response_model=CharacterResponse)

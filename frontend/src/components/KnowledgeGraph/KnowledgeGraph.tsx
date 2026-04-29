@@ -118,8 +118,8 @@ function EntityNode({ data }: EntityNodeProps) {
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: 'transparent', border: 'none' }} />
-      <Handle type="target" position={Position.Top} style={{ background: 'transparent', border: 'none' }} />
+      <Handle id="target-left" type="target" position={Position.Left} style={{ background: 'transparent', border: 'none' }} />
+      <Handle id="target-top" type="target" position={Position.Top} style={{ background: 'transparent', border: 'none' }} />
       <span
         style={{
           fontSize: 12,
@@ -143,8 +143,8 @@ function EntityNode({ data }: EntityNodeProps) {
       >
         {ENTITY_TYPE_LABELS[data.entity_type] || data.entity_type}
       </span>
-      <Handle type="source" position={Position.Right} style={{ background: 'transparent', border: 'none' }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: 'transparent', border: 'none' }} />
+      <Handle id="source-right" type="source" position={Position.Right} style={{ background: 'transparent', border: 'none' }} />
+      <Handle id="source-bottom" type="source" position={Position.Bottom} style={{ background: 'transparent', border: 'none' }} />
     </div>
   );
 }

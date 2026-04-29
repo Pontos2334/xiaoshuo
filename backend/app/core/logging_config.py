@@ -18,7 +18,6 @@ def setup_logging(level: str = "INFO"):
 
     # 降低第三方库日志级别
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("anthropic").setLevel(logging.WARNING)
 
     return logging.getLogger("app")
 

@@ -19,11 +19,11 @@ def safe_read_file(file_path: str, encoding: str = "utf-8") -> str:
         try:
             with open(file_path, "r", encoding="gbk") as f:
                 return f.read()
-        except Exception:
-            raise IOError(f"无法读取文件: {file_path}")
-    except IOError as e:
+        except Exception as ex:
+            raise OSError(f"无法读取文件: {file_path}") from ex
+    except OSError as e:
         logger.error(f"文件读取错误: {file_path}, {e}")
-        raise IOError(f"文件读取失败: {file_path}")
+        raise
 
 
 def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> bool:

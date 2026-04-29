@@ -15,7 +15,7 @@ MAX_CHAPTER_CONTENT = 8000  # 单章最大内容
 
 # Map-Reduce 配置
 LONG_TEXT_THRESHOLD = 15000  # 触发 Map-Reduce 的字符阈值
-CHUNK_SIZE_CHARACTER = 3000  # 人物分析块大小
+CHUNK_SIZE_CHARACTER = 10000  # 人物分析块大小
 MAX_CONCURRENT_TASKS = 3     # 最大并发任务数
 
 

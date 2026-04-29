@@ -40,7 +40,7 @@ const markdownStyles = `
 `;
 
 export function InspirationPanel({ onGenerateInspiration, isAnalyzing }: InspirationPanelProps) {
-  const { inspirations, addInspiration, deleteInspiration } = useInspirationStore();
+  const { inspirations, addInspiration, updateInspiration, deleteInspiration } = useInspirationStore();
   const { characters } = useCharacterStore();
   const { plotNodes } = usePlotStore();
   const [activeType, setActiveType] = useState('scene');
@@ -133,19 +133,11 @@ export function InspirationPanel({ onGenerateInspiration, isAnalyzing }: Inspira
   const handleSaveEdit = useCallback((id: string) => {
     const content = editContent[id];
     if (content) {
-      // 更新灵感内容（通过删除再添加）
-      const insp = inspirations.find(i => i.id === id);
-      if (insp) {
-        deleteInspiration(id);
-        addInspiration({
-          ...insp,
-          content: content,
-        });
-        toast.success('已保存修改');
-      }
+      updateInspiration(id, { content });
+      toast.success('已保存修改');
     }
     setViewMode(prev => ({ ...prev, [id]: 'preview' }));
-  }, [editContent, inspirations, deleteInspiration, addInspiration]);
+  }, [editContent, updateInspiration]);
 
   const typeOptions = [
     { value: 'scene', label: '场景', icon: BookOpen },
@@ -191,7 +183,7 @@ export function InspirationPanel({ onGenerateInspiration, isAnalyzing }: Inspira
           </CardHeader>
           <CardContent className="max-h-48 overflow-auto p-0">
             <div className="px-3 pb-3 space-y-1">
-              {characters.length > 0 ? characters.map((char) => (
+              {characters.length > 0 ? characters.filter(c => c.id).map((char) => (
                 <label key={char.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted cursor-pointer">
                   <Checkbox checked={selectedCharacters.includes(char.id)} onCheckedChange={() => toggleCharacter(char.id)} className="h-4 w-4" />
                   <span className="text-sm truncate flex-1">{char.name}</span>

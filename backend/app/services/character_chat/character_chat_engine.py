@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from anthropic import Anthropic
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -144,12 +144,12 @@ class CharacterChatEngine:
     SESSION_TIMEOUT_HOURS = 24  # 会话超时时间（小时）
 
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
-        self.model = model or settings.CLAUDE_MODEL
+        self.api_key = api_key or settings.DEEPSEEK_API_KEY
+        self.base_url = base_url or settings.DEEPSEEK_BASE_URL
+        self.model = model or settings.DEEPSEEK_MODEL
 
         if self.api_key:
-            self.client = Anthropic(
+            self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
@@ -362,14 +362,15 @@ class CharacterChatEngine:
             })
 
         try:
-            response = self.client.messages.create(
+            if system_prompt:
+                messages.insert(0, {"role": "system", "content": system_prompt})
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=1000,
-                system=system_prompt,
                 messages=messages
             )
 
-            response_text = response.content[0].text
+            response_text = response.choices[0].message.content
 
             # 添加助手回复
             session.add_message("assistant", response_text)

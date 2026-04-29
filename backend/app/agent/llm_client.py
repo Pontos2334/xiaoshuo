@@ -1,13 +1,13 @@
 """
 共享 LLM 客户端工厂
 
-统一管理 Anthropic 兼容 API 客户端实例，避免各服务重复创建
+统一管理 DeepSeek API（OpenAI SDK 兼容）客户端实例，避免各服务重复创建
 """
 
 import asyncio
 import logging
 from typing import Optional
-import anthropic
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -18,7 +18,7 @@ class LLMClientFactory:
     """LLM 客户端工厂（单例模式）"""
 
     _instance: Optional["LLMClientFactory"] = None
-    _client: Optional[anthropic.Anthropic] = None
+    _client: Optional[OpenAI] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -27,23 +27,23 @@ class LLMClientFactory:
         return cls._instance
 
     def _init_client(self):
-        if settings.ANTHROPIC_API_KEY:
-            self._client = anthropic.Anthropic(
-                api_key=settings.ANTHROPIC_API_KEY,
-                base_url=settings.ANTHROPIC_BASE_URL,
+        if settings.DEEPSEEK_API_KEY:
+            self._client = OpenAI(
+                api_key=settings.DEEPSEEK_API_KEY,
+                base_url=settings.DEEPSEEK_BASE_URL,
             )
-            logger.info(f"LLM 客户端初始化: model={settings.CLAUDE_MODEL}, base_url={settings.ANTHROPIC_BASE_URL}")
+            logger.info(f"LLM 客户端初始化: model={settings.DEEPSEEK_MODEL}, base_url={settings.DEEPSEEK_BASE_URL}")
         else:
             self._client = None
-            logger.warning("未配置 ANTHROPIC_API_KEY")
+            logger.warning("未配置 DEEPSEEK_API_KEY")
 
     @property
-    def client(self) -> Optional[anthropic.Anthropic]:
+    def client(self) -> Optional[OpenAI]:
         return self._client
 
     @property
     def model(self) -> str:
-        return settings.CLAUDE_MODEL
+        return settings.DEEPSEEK_MODEL
 
     @property
     def max_tokens(self) -> int:
@@ -58,13 +58,20 @@ class LLMClientFactory:
         if not self._client:
             raise RuntimeError("LLM 客户端未初始化")
 
-        message = self._client.messages.create(
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        else:
+            messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
+        messages.append({"role": "user", "content": prompt})
+
+        response = self._client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=system_prompt or "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
+            extra_body={"thinking": {"type": "enabled"}},
         )
-        return message.content[0].text
+        return response.choices[0].message.content
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """异步生成（使用 asyncio.to_thread 避免阻塞事件循环）"""

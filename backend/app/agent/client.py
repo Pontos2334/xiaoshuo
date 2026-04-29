@@ -5,33 +5,34 @@ import json
 from typing import Optional
 from datetime import datetime
 from app.core.config import settings
-import anthropic
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 
-class ClaudeAgentClient:
-    """Claude Agent客户端，支持智谱AI等兼容API"""
+class AIAgentClient:
+    """AI Agent客户端，基于 DeepSeek API（OpenAI SDK 兼容）"""
 
     def __init__(self):
-        self.api_key = settings.ANTHROPIC_API_KEY
-        self.base_url = settings.ANTHROPIC_BASE_URL
-        self.model = settings.CLAUDE_MODEL
+        self.api_key = settings.DEEPSEEK_API_KEY
+        self.base_url = settings.DEEPSEEK_BASE_URL
+        self.model = settings.DEEPSEEK_MODEL
         self.max_tokens = settings.MAX_TOKENS
+        self.reasoning_effort = settings.DEEPSEEK_REASONING_EFFORT
 
         # 日志保存目录
         self.log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "llm")
         os.makedirs(self.log_dir, exist_ok=True)
 
         if self.api_key:
-            self.client = anthropic.Anthropic(
+            self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
-            logger.info(f"LLM 客户端初始化完成: model={self.model}, base_url={self.base_url}")
+            logger.info(f"AI 客户端初始化完成: model={self.model}, base_url={self.base_url}")
         else:
             self.client = None
-            logger.warning("未配置ANTHROPIC_API_KEY，将使用模拟响应")
+            logger.warning("未配置 DEEPSEEK_API_KEY，将使用模拟响应")
 
     def _save_llm_log(self, prompt: str, response: str, error: Optional[str] = None, metadata: dict = None):
         """保存 LLM 调用日志"""
@@ -64,60 +65,53 @@ class ClaudeAgentClient:
             try:
                 logger.info(f"调用 LLM: model={self.model}, prompt_length={len(prompt)}")
 
-                message = await asyncio.to_thread(
-                    self.client.messages.create,
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                else:
+                    messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
+                messages.append({"role": "user", "content": prompt})
+
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    system=system_prompt or "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。",
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
+                    messages=messages,
+                    timeout=120.0,
+                    extra_body={"thinking": {"type": "enabled"}}
                 )
 
-                response_text = message.content[0].text
+                if not response.choices or response.choices[0].message.content is None:
+                    raise RuntimeError("API 返回空响应或内容为 null")
 
-                # 记录成功调用
-                logger.info(f"LLM 响应成功: response_length={len(response_text)}")
+                response_text = response.choices[0].message.content
+                reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
 
-                # 保存日志
+                logger.info(f"LLM 响应成功: response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
+
                 self._save_llm_log(
                     prompt=prompt,
                     response=response_text,
                     metadata={
+                        "reasoning_content": reasoning_content[:500] + "..." if reasoning_content and len(reasoning_content) > 500 else reasoning_content,
+                        "reasoning_length": len(reasoning_content) if reasoning_content else 0,
                         "usage": {
-                            "input_tokens": getattr(message.usage, 'input_tokens', None),
-                            "output_tokens": getattr(message.usage, 'output_tokens', None)
-                        } if hasattr(message, 'usage') else None
+                            "input_tokens": response.usage.prompt_tokens if response.usage else None,
+                            "output_tokens": response.usage.completion_tokens if response.usage else None
+                        }
                     }
                 )
 
                 return response_text
 
-            except anthropic.APIError as e:
-                error_msg = f"Anthropic API 错误: {e}"
-                logger.error(error_msg)
-                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "APIError"})
-                return self._mock_response(prompt)
-
-            except anthropic.APIConnectionError as e:
-                error_msg = f"API 连接错误: {e}"
-                logger.error(error_msg)
-                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "APIConnectionError"})
-                return self._mock_response(prompt)
-
-            except anthropic.RateLimitError as e:
-                error_msg = f"API 限流错误: {e}"
-                logger.error(error_msg)
-                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": "RateLimitError"})
-                return self._mock_response(prompt)
-
             except Exception as e:
-                error_msg = f"API 调用未知错误: {type(e).__name__}: {e}"
+                error_msg = f"API 调用错误: {type(e).__name__}: {e}"
                 logger.error(error_msg)
                 self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": type(e).__name__})
-                return self._mock_response(prompt)
+                raise RuntimeError(error_msg) from e
         else:
-            return self._mock_response(prompt)
+            # 仅在未配置 API key 时使用 demo 响应（用于开发测试）
+            return self._demo_response(prompt)
 
     def generate_sync(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """同步生成响应"""
@@ -125,19 +119,35 @@ class ClaudeAgentClient:
             try:
                 logger.info(f"调用 LLM (sync): model={self.model}, prompt_length={len(prompt)}")
 
-                message = self.client.messages.create(
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                else:
+                    messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
+                messages.append({"role": "user", "content": prompt})
+
+                response = self.client.chat.completions.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    system=system_prompt or "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。",
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
+                    messages=messages,
+                    timeout=120.0,
+                    extra_body={"thinking": {"type": "enabled"}}
                 )
 
-                response_text = message.content[0].text
-                logger.info(f"LLM 响应成功 (sync): response_length={len(response_text)}")
+                if not response.choices or response.choices[0].message.content is None:
+                    raise RuntimeError("API 返回空响应或内容为 null")
 
-                self._save_llm_log(prompt=prompt, response=response_text)
+                response_text = response.choices[0].message.content
+                reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
+                logger.info(f"LLM 响应成功 (sync): response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
+
+                self._save_llm_log(
+                    prompt=prompt,
+                    response=response_text,
+                    metadata={
+                        "reasoning_length": len(reasoning_content) if reasoning_content else 0
+                    }
+                )
 
                 return response_text
 
@@ -145,12 +155,12 @@ class ClaudeAgentClient:
                 error_msg = f"API 调用错误: {type(e).__name__}: {e}"
                 logger.error(error_msg)
                 self._save_llm_log(prompt=prompt, response=None, error=error_msg)
-                return self._mock_response(prompt)
+                raise RuntimeError(error_msg) from e
         else:
-            return self._mock_response(prompt)
+            return self._demo_response(prompt)
 
-    def _mock_response(self, prompt: str) -> str:
-        """模拟响应（用于测试或无API密钥时）"""
+    def _demo_response(self, prompt: str) -> str:
+        """演示/开发用响应（仅在未配置 API key 时使用）"""
         logger.info("使用模拟响应")
         if "人物" in prompt or "角色" in prompt:
             return '''```json
@@ -305,3 +315,7 @@ class ClaudeAgentClient:
 """
         else:
             return "这是一个模拟响应。请检查API配置。"
+
+
+# 向后兼容别名
+ClaudeAgentClient = AIAgentClient

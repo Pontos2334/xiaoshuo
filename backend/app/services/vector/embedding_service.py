@@ -74,8 +74,8 @@ class EmbeddingService:
             # 云端模式
             from openai import OpenAI
 
-            self.api_key = api_key or settings.ANTHROPIC_API_KEY
-            self.base_url = base_url or settings.ANTHROPIC_BASE_URL
+            self.api_key = api_key or settings.DEEPSEEK_API_KEY
+            self.base_url = base_url or settings.DEEPSEEK_BASE_URL
             self.model = model or 'text-embedding-v3'
 
             if self.api_key:

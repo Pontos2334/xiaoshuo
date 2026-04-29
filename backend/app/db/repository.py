@@ -141,7 +141,7 @@ class CharacterRelationRepository(BaseRepository):
         MATCH (c)-[rel:RELATED_TO]->(c2:Character)
         WHERE (n)-[:HAS_CHARACTER]->(c) AND (n)-[:HAS_CHARACTER]->(c2)
         RETURN {
-            id: elementId(rel),
+            id: rel.id,
             source_id: c.id,
             target_id: c2.id,
             relation_type: rel.type,
@@ -168,13 +168,13 @@ class CharacterRelationRepository(BaseRepository):
         query = """
         MATCH (c1:Character {id: $source_id})
         MATCH (c2:Character {id: $target_id})
-        CREATE (c1)-[:RELATED_TO {
+        CREATE (c1)-[rel:RELATED_TO {
             id: $rel_id,
             type: $type,
             description: $description,
             strength: $strength
         }]->(c2)
-        RETURN elementId(relationship) as id
+        RETURN elementId(rel) as id
         """
         params = {
             "source_id": source_id,
@@ -223,9 +223,9 @@ class CharacterRelationRepository(BaseRepository):
 
         query = f"""
         MATCH ()-[rel:RELATED_TO]->()
-        WHERE elementId(rel) = $rel_id
+        WHERE rel.id = $rel_id
         SET {', '.join(set_parts)}
-        RETURN elementId(rel) as id
+        RETURN rel.id as id
         """
         try:
             neo4j_client.run_single(query, params)
@@ -238,7 +238,7 @@ class CharacterRelationRepository(BaseRepository):
         """删除关系"""
         query = """
         MATCH ()-[rel:RELATED_TO]->()
-        WHERE elementId(rel) = $rel_id
+        WHERE rel.id = $rel_id
         DELETE rel
         """
         try:

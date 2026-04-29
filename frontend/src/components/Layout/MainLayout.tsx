@@ -32,6 +32,7 @@ import {
   TrendingUp,
   Activity,
   ListTree,
+  FileUp,
 } from 'lucide-react';
 
 const LAST_PATH_KEY = 'novel-assistant-last-path';
@@ -43,7 +44,13 @@ interface MainLayoutProps {
 // 扩展 Window 类型
 declare global {
   interface Window {
-    showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+    showDirectoryPicker?: (options?: { id?: string; startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' }) => Promise<FileSystemDirectoryHandle>;
+    showOpenFilePicker?: (options?: {
+      multiple?: boolean;
+      id?: string;
+      startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos';
+      types?: { description?: string; accept: Record<string, string[]> }[];
+    }) => Promise<FileSystemFileHandle[]>;
   }
 }
 
@@ -104,7 +111,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
     try {
       setIsLoading(true);
-      const dirHandle = await window.showDirectoryPicker() as ExtendedFileSystemDirectoryHandle;
+      const dirHandle = await window.showDirectoryPicker({ id: 'novel-import', startIn: 'documents' }) as ExtendedFileSystemDirectoryHandle;
       const folderName = dirHandle.name;
 
       const files: { name: string; content: string; size: number }[] = [];
@@ -113,7 +120,8 @@ export function MainLayout({ children }: MainLayoutProps) {
         if (entry.kind === 'file') {
           const fileHandle = entry as ExtendedFileSystemFileHandle;
           const file = await fileHandle.getFile();
-          if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+          const lowerName = file.name.toLowerCase();
+          if (lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
             const content = await file.text();
             files.push({ name: file.name, content, size: file.size });
           }
@@ -151,6 +159,73 @@ export function MainLayout({ children }: MainLayoutProps) {
       if ((error as Error).name === 'AbortError') return;
       console.error('选择文件夹失败:', error);
       toast.error('选择文件夹失败，请重试');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 选择单个/多个小说文件
+  const handleSelectFiles = async () => {
+    if (!window.showOpenFilePicker) {
+      toast.warning('当前浏览器不支持文件选择器，请使用文件夹导入或手动输入路径');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const handles = await window.showOpenFilePicker({
+        id: 'novel-import-file',
+        startIn: 'documents',
+        multiple: true,
+        types: [
+          {
+            description: '小说文件',
+            accept: { 'text/plain': ['.txt', '.md'] },
+          },
+        ],
+      });
+
+      const uploadFiles: { name: string; content: string; size: number }[] = [];
+      for (const handle of handles) {
+        const file = await handle.getFile();
+        const lowerName = file.name.toLowerCase();
+        if (lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
+          const content = await file.text();
+          uploadFiles.push({ name: file.name, content, size: file.size });
+        }
+      }
+
+      if (uploadFiles.length === 0) {
+        toast.warning('未选择到 TXT/MD 小说文件');
+        setIsLoading(false);
+        return;
+      }
+
+      const folderName = uploadFiles.length === 1 ? uploadFiles[0].name.replace(/\.(txt|md)$/i, '') : `批量导入_${Date.now()}`;
+      const response = await fetch(`${API_URL}/files/upload-folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderName, files: uploadFiles }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        const newNovels = data.data.filter(
+          (newNovel: Novel) => !novels.some((n) => n.id === newNovel.id)
+        );
+        setNovels([...novels, ...newNovels]);
+        if (data.data.length > 0) {
+          setCurrentNovel(data.data[0]);
+        }
+        toast.success(`已添加 ${newNovels.length} 部小说`);
+      } else {
+        toast.error(data.error || '导入文件失败');
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') return;
+      console.error('选择文件失败:', error);
+      toast.error('选择文件失败，请重试');
     } finally {
       setIsLoading(false);
     }
@@ -277,6 +352,10 @@ export function MainLayout({ children }: MainLayoutProps) {
           <Button variant="ghost" size="sm" onClick={() => setQuickSearchOpen(true)} title="角色速查 (Ctrl+K)" className="text-muted-foreground hover:text-foreground">
             <Search className="h-4 w-4 mr-1" />
             <span className="text-xs hidden sm:inline">速查</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleSelectFiles} disabled={isLoading} className="shadow-sm hover:shadow transition-shadow">
+            <FileUp className="h-4 w-4 mr-2" />
+            选择文件
           </Button>
           <Button variant="outline" size="sm" onClick={handleOpenFolder} disabled={isLoading} className="shadow-sm hover:shadow transition-shadow">
             {isLoading ? (

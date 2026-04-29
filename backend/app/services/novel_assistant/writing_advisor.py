@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
-from anthropic import Anthropic
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -43,12 +43,12 @@ class WritingAdvisor:
     """
 
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
-        self.model = model or settings.CLAUDE_MODEL
+        self.api_key = api_key or settings.DEEPSEEK_API_KEY
+        self.base_url = base_url or settings.DEEPSEEK_BASE_URL
+        self.model = model or settings.DEEPSEEK_MODEL
 
         if self.api_key:
-            self.client = Anthropic(
+            self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
@@ -110,13 +110,13 @@ class WritingAdvisor:
 请输出 JSON：
 """
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            content = response.content[0].text
+            content = response.choices[0].message.content
             return self._parse_advice(content, "人物塑造")
 
         except Exception as e:
@@ -182,13 +182,13 @@ class WritingAdvisor:
 请输出 JSON：
 """
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            content = response.content[0].text
+            content = response.choices[0].message.content
             return self._parse_advice(content, "情节结构")
 
         except Exception as e:
@@ -263,13 +263,13 @@ class WritingAdvisor:
 """
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=4000,
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            content = response.content[0].text
+            content = response.choices[0].message.content
 
             # 提取 JSON
             json_match = content[content.find('{'):content.rfind('}')+1]
@@ -341,13 +341,13 @@ class WritingAdvisor:
 请提供 3-5 个不同的转折建议。
 """
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=3000,
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            content = response.content[0].text
+            content = response.choices[0].message.content
             json_match = content[content.find('{'):content.rfind('}')+1]
             data = json.loads(json_match)
 

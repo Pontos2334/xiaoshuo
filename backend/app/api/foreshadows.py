@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 import json
-import re
 
 from app.models.database import get_db
 from app.models.models import Novel, Chapter, Foreshadow
@@ -13,6 +12,7 @@ from app.models.schemas import (
     ForeshadowCreate, ForeshadowUpdate, ForeshadowResponse, ApiResponse
 )
 from app.core.file_utils import safe_read_file
+from app.core.json_utils import JSONParser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ async def delete_foreshadow(foreshadow_id: str, db: Session = Depends(get_db)):
 
     db.delete(foreshadow)
     db.commit()
-    return ApiResponse(success=True, data={"message": f"已删除伏笔「{foreshadow.title}"})
+    return ApiResponse(success=True, data={"message": f"已删除伏笔「{foreshadow.title}」"})
 
 
 # ========== AI 功能 ==========
@@ -191,7 +191,7 @@ async def extract_foreshadows(novel_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "foreshadows" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -291,7 +291,7 @@ async def check_foreshadow_resolution(novel_id: str, db: Session = Depends(get_d
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "results" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -390,7 +390,7 @@ async def suggest_foreshadow_resolution(
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "suggestions" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -455,14 +455,3 @@ async def get_foreshadow_alerts(
         }
     )
 
-
-def _parse_json_response(text: str) -> Optional[dict]:
-    """解析AI返回的JSON，支持```json包裹"""
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return None

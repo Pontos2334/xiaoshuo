@@ -30,7 +30,7 @@ import {
 import { useCharacterStore } from '@/stores';
 import { API_URL } from '@/lib/constants';
 import { Character, CharacterRelation } from '@/types';
-import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown, Users } from 'lucide-react';
+import { RefreshCw, Edit2, Trash2, Loader2, Plus, X, ChevronDown, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { CharacterNode } from './CharacterNode';
 import { getLayoutedElements } from '@/lib/layoutUtils';
@@ -41,13 +41,15 @@ interface CharacterGraphProps {
   isAnalyzing?: boolean;
   analyzeMode?: AnalyzeMode;
   setAnalyzeMode?: (mode: AnalyzeMode) => void;
+  progress?: { percent: number; current: number; total: number; message: string };
+  onCancel?: () => void;
 }
 
 const nodeTypes = {
   characterNode: CharacterNode,
 };
 
-export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental', setAnalyzeMode }: CharacterGraphProps) {
+export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremental', setAnalyzeMode, progress, onCancel }: CharacterGraphProps) {
   const {
     characters,
     relations,
@@ -83,12 +85,14 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
 
   // 转换为 React Flow 格式并应用布局
   const { initialNodes, initialEdges } = useMemo(() => {
-    const nodes: Node[] = characters.map((char) => ({
-      id: char.id,
-      type: 'characterNode',
-      position: { x: 0, y: 0 },
-      data: char,
-    }));
+    const nodes: Node[] = characters
+      .filter((char) => char.id)
+      .map((char) => ({
+        id: char.id,
+        type: 'characterNode',
+        position: { x: 0, y: 0 },
+        data: char,
+      }));
 
     const validEdges: Edge[] = relations
       .filter((rel) => {
@@ -163,15 +167,16 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
 
   const handleSaveEdit = useCallback(async () => {
     if (!editingCharacter) return;
-    updateCharacter(editingCharacter.id, editingCharacter);
+    const characterToSave = { ...editingCharacter };
     setEditDialogOpen(false);
     setEditingCharacter(null);
     try {
-      await fetch(`${API_URL}/characters/${editingCharacter.id}`, {
+      await fetch(`${API_URL}/characters/${characterToSave.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingCharacter),
+        body: JSON.stringify(characterToSave),
       });
+      updateCharacter(characterToSave.id, characterToSave);
     } catch (error) {
       console.error('保存人物失败:', error);
       toast.error('保存到后端失败');
@@ -181,10 +186,10 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
   const handleDelete = useCallback(
     async (id: string) => {
       if (!confirm('确定要删除这个人物吗？')) return;
-      deleteCharacter(id);
-      setSelectedCharacter(null);
       try {
         await fetch(`${API_URL}/characters/${id}`, { method: 'DELETE' });
+        deleteCharacter(id);
+        setSelectedCharacter(null);
       } catch (error) {
         console.error('删除人物失败:', error);
         toast.error('从后端删除失败');
@@ -263,17 +268,17 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
 
   const handleSaveEditRelation = useCallback(async () => {
     if (!editingRelation) return;
-    updateRelation(editingRelation.id, editingRelation);
+    const relationToSave = { ...editingRelation };
     setEditRelationDialogOpen(false);
-    const saved = editingRelation;
     setEditingRelation(null);
-    setSelectedRelation(saved);
     try {
-      await fetch(`${API_URL}/characters/relations/${saved.id}`, {
+      await fetch(`${API_URL}/characters/relations/${relationToSave.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saved),
+        body: JSON.stringify(relationToSave),
       });
+      updateRelation(relationToSave.id, relationToSave);
+      setSelectedRelation(relationToSave);
     } catch (error) {
       console.error('保存关系失败:', error);
       toast.error('保存关系到后端失败');
@@ -283,10 +288,10 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
   const handleDeleteRelation = useCallback(
     async (id: string) => {
       if (!confirm('确定要删除这个关系吗？')) return;
-      deleteRelation(id);
-      setSelectedRelation(null);
       try {
         await fetch(`${API_URL}/characters/relations/${id}`, { method: 'DELETE' });
+        deleteRelation(id);
+        setSelectedRelation(null);
       } catch (error) {
         console.error('删除关系失败:', error);
         toast.error('从后端删除关系失败');
@@ -311,42 +316,64 @@ export function CharacterGraph({ onAnalyze, isAnalyzing, analyzeMode = 'incremen
       <Card className="flex-1">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>人物关系图</CardTitle>
-          <div className="flex gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={isAnalyzing}>
-                  {isAnalyzing ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-1" />
-                  )}
-                  {isAnalyzing ? '分析中...' : 'AI分析'}
-                  <ChevronDown className="h-4 w-4 ml-1" />
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={isAnalyzing}>
+                    {isAnalyzing ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-1" />
+                    )}
+                    {isAnalyzing ? '分析中...' : 'AI分析'}
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setAnalyzeMode?.('incremental');
+                      onAnalyze?.('incremental');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <span className={analyzeMode === 'incremental' ? 'font-bold' : ''}>增量分析</span>
+                    <span className="text-xs text-muted-foreground ml-auto">推荐</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setAnalyzeMode?.('full');
+                      onAnalyze?.('full');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <span className={analyzeMode === 'full' ? 'font-bold' : ''}>全量分析</span>
+                    <span className="text-xs text-muted-foreground ml-auto">重新分析全部</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {isAnalyzing && onCancel && (
+                <Button variant="ghost" size="sm" onClick={onCancel} className="text-red-500 hover:text-red-700">
+                  <XCircle className="h-4 w-4 mr-1" />
+                  停止
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
-                    setAnalyzeMode?.('incremental');
-                    onAnalyze?.('incremental');
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <span className={analyzeMode === 'incremental' ? 'font-bold' : ''}>增量分析</span>
-                  <span className="text-xs text-muted-foreground ml-auto">推荐</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setAnalyzeMode?.('full');
-                    onAnalyze?.('full');
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <span className={analyzeMode === 'full' ? 'font-bold' : ''}>全量分析</span>
-                  <span className="text-xs text-muted-foreground ml-auto">重新分析全部</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              )}
+            </div>
+            {isAnalyzing && progress && (
+              <div className="w-64">
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-300 ease-out rounded-full"
+                    style={{ width: `${Math.max(progress.percent, 2)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 truncate">
+                  {progress.percent > 0 && `${progress.percent.toFixed(0)}% `}
+                  {progress.message}
+                </p>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">

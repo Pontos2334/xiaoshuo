@@ -15,6 +15,7 @@ from app.models.schemas import (
     DeepConsistencyCheckResponse, DeepConsistencyIssue
 )
 from app.core.file_utils import safe_read_file
+from app.core.json_utils import JSONParser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ async def delete_entity(entity_id: str, db: Session = Depends(get_db)):
 
     db.delete(entity)
     db.commit()
-    return ApiResponse(success=True, data={"message": f"已删除实体「{entity.name}"})
+    return ApiResponse(success=True, data={"message": f"已删除实体「{entity.name}」"})
 
 
 # ========== 实体关系 CRUD ==========
@@ -262,7 +263,7 @@ async def extract_entities(novel_id: str, entity_type: Optional[str] = None, db:
             return ApiResponse(success=False, error="AI生成失败")
 
         # 解析 JSON 响应
-        entities_data = _parse_json_response(response)
+        entities_data = JSONParser.safe_parse_json(response)
         if not entities_data or "entities" not in entities_data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -342,7 +343,7 @@ async def auto_extract_terminology(novel_id: str, db: Session = Depends(get_db))
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "terms" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -490,7 +491,7 @@ async def check_consistency(novel_id: str, db: Session = Depends(get_db)):
                 novel_id=novel_id, total_issues=0, issues=[]
             )
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         issues = []
         if data and "issues" in data:
             for item in data["issues"]:
@@ -521,19 +522,6 @@ async def check_consistency(novel_id: str, db: Session = Depends(get_db)):
             )]
         )
 
-
-def _parse_json_response(text: str) -> Optional[dict]:
-    """解析AI返回的JSON，支持```json包裹"""
-    import re
-    # 尝试提取 ```json ... ``` 中的内容
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return None
 
 
 @router.post("/consistency/deep-check", response_model=DeepConsistencyCheckResponse)

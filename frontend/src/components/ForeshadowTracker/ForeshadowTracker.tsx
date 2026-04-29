@@ -182,6 +182,7 @@ export function ForeshadowTracker() {
       }
     } catch {
       console.error('加载伏笔列表失败');
+      toast.error('加载伏笔列表失败');
     } finally {
       setIsLoading(false);
     }
@@ -205,6 +206,7 @@ export function ForeshadowTracker() {
       }
     } catch {
       console.error('加载伏笔告警失败');
+      toast.error('加载伏笔告警失败');
     } finally {
       setAlertsLoading(false);
     }

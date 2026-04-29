@@ -105,11 +105,14 @@ export function CharacterQuickSearch({ open, onOpenChange }: CharacterQuickSearc
                   </div>
 
                   <div className="flex items-center gap-2 mt-0.5">
-                    {char.basicInfo?.identity && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {String(char.basicInfo.identity)}
-                      </Badge>
-                    )}
+                    {(() => {
+                      const identity = char.basicInfo?.identity || char.basicInfo?.身份;
+                      return identity ? (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {String(identity)}
+                        </Badge>
+                      ) : null;
+                    })()}
                     {char.firstAppear && (
                       <span className="text-xs text-muted-foreground">
                         首次出场：{char.firstAppear}

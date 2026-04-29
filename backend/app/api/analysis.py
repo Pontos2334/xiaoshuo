@@ -105,19 +105,19 @@ class AnalysisStartResponse(BaseModel):
     message: str
 
 
-def update_task_progress(task_id: str, progress: AnalysisProgress):
+def update_task_progress(task_id: str, progress: AnalysisProgress, db: Session = None):
     """更新任务进度"""
     if task_id in analysis_tasks:
         analysis_tasks[task_id]['progress'] = progress.to_dict()
         analysis_tasks[task_id]['status'] = progress.status
-        # 异步持久化（非阻塞）
+        # 持久化（优先使用传入的 db session，避免创建新连接）
         try:
-            from app.models.database import SessionLocal
-            db = SessionLocal()
-            try:
+            if db:
                 _persist_task(task_id, db)
-            finally:
-                db.close()
+            else:
+                from app.models.database import SessionLocal
+                with SessionLocal() as local_db:
+                    _persist_task(task_id, local_db)
         except Exception:
             pass
 
@@ -125,118 +125,142 @@ def update_task_progress(task_id: str, progress: AnalysisProgress):
 async def run_character_analysis(
     task_id: str,
     novel_id: str,
-    db: Session
 ):
-    """后台运行人物分析"""
-    try:
-        from app.services.character_analyzer import CharacterAnalyzer
+    """后台运行人物分析（使用独立 DB session）"""
+    from app.models.database import SessionLocal
 
-        # 获取小说内容
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
-        if not novel:
+    with SessionLocal() as db:
+        try:
+            from app.services.character_analyzer import CharacterAnalyzer
+
+            # 获取小说内容
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
+            if not novel:
+                analysis_tasks[task_id]['status'] = 'failed'
+                analysis_tasks[task_id]['error'] = '小说不存在'
+                return
+
+            content = ""
+            if novel.content_path:
+                content = safe_read_file(novel.content_path)
+
+            if not content:
+                analysis_tasks[task_id]['status'] = 'failed'
+                analysis_tasks[task_id]['error'] = '小说内容为空'
+                return
+
+            # 初始化进度
+            analysis_tasks[task_id]['progress'] = {
+                'total_chunks': 0,
+                'completed_chunks': 0,
+                'progress_percent': 0,
+                'status': 'in_progress'
+            }
+
+            # 创建进度回调
+            def progress_callback(p: AnalysisProgress):
+                update_task_progress(task_id, p, db)
+
+            # 检查是否已被取消
+            if analysis_tasks[task_id].get('status') == 'cancelled':
+                logger.info(f"人物分析任务已取消: {task_id}")
+                return
+
+            # 执行分析
+            analyzer = CharacterAnalyzer(use_map_reduce=True)
+            result = await analyzer.analyze(content, progress_callback=progress_callback)
+
+            # 再次检查是否已被取消
+            if analysis_tasks[task_id].get('status') == 'cancelled':
+                logger.info(f"人物分析任务在完成前被取消: {task_id}")
+                return
+
+            # 保存结果
+            analysis_tasks[task_id]['result'] = result
+            analysis_tasks[task_id]['status'] = 'completed'
+            analysis_tasks[task_id]['progress']['status'] = 'completed'
+            analysis_tasks[task_id]['progress']['progress_percent'] = 100
+            _persist_task(task_id, db)
+
+            logger.info(f"人物分析任务完成: {task_id}, 识别 {len(result)} 个人物")
+
+        except Exception as e:
+            logger.error(f"人物分析任务失败: {task_id}, {e}")
             analysis_tasks[task_id]['status'] = 'failed'
-            analysis_tasks[task_id]['error'] = '小说不存在'
-            return
-
-        content = ""
-        if novel.content_path:
-            content = safe_read_file(novel.content_path)
-
-        if not content:
-            analysis_tasks[task_id]['status'] = 'failed'
-            analysis_tasks[task_id]['error'] = '小说内容为空'
-            return
-
-        # 初始化进度
-        analysis_tasks[task_id]['progress'] = {
-            'total_chunks': 0,
-            'completed_chunks': 0,
-            'progress_percent': 0,
-            'status': 'in_progress'
-        }
-
-        # 创建进度回调
-        def progress_callback(p: AnalysisProgress):
-            update_task_progress(task_id, p)
-
-        # 执行分析
-        analyzer = CharacterAnalyzer(use_map_reduce=True)
-        result = await analyzer.analyze(content, progress_callback=progress_callback)
-
-        # 保存结果
-        analysis_tasks[task_id]['result'] = result
-        analysis_tasks[task_id]['status'] = 'completed'
-        analysis_tasks[task_id]['progress']['status'] = 'completed'
-        analysis_tasks[task_id]['progress']['progress_percent'] = 100
-        _persist_task(task_id, db)
-
-        logger.info(f"人物分析任务完成: {task_id}, 识别 {len(result)} 个人物")
-
-    except Exception as e:
-        logger.error(f"人物分析任务失败: {task_id}, {e}")
-        analysis_tasks[task_id]['status'] = 'failed'
-        analysis_tasks[task_id]['error'] = str(e)
-        _persist_task(task_id, db)
+            analysis_tasks[task_id]['error'] = str(e)
+            _persist_task(task_id, db)
 
 
 async def run_plot_analysis(
     task_id: str,
     novel_id: str,
-    db: Session
 ):
-    """后台运行情节分析"""
-    try:
-        from app.services.plot_analyzer import PlotAnalyzer
+    """后台运行情节分析（使用独立 DB session）"""
+    from app.models.database import SessionLocal
 
-        # 获取小说内容
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
-        if not novel:
+    with SessionLocal() as db:
+        try:
+            from app.services.plot_analyzer import PlotAnalyzer
+
+            # 获取小说内容
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
+            if not novel:
+                analysis_tasks[task_id]['status'] = 'failed'
+                analysis_tasks[task_id]['error'] = '小说不存在'
+                return
+
+            content = ""
+            outline = ""
+            if novel.content_path:
+                content = safe_read_file(novel.content_path)
+            if novel.outline_path:
+                outline = safe_read_file(novel.outline_path)
+
+            if not content:
+                analysis_tasks[task_id]['status'] = 'failed'
+                analysis_tasks[task_id]['error'] = '小说内容为空'
+                return
+
+            # 初始化进度
+            analysis_tasks[task_id]['progress'] = {
+                'total_chunks': 0,
+                'completed_chunks': 0,
+                'progress_percent': 0,
+                'status': 'in_progress'
+            }
+
+            # 创建进度回调
+            def progress_callback(p: AnalysisProgress):
+                update_task_progress(task_id, p, db)
+
+            # 检查是否已被取消
+            if analysis_tasks[task_id].get('status') == 'cancelled':
+                logger.info(f"情节分析任务已取消: {task_id}")
+                return
+
+            # 执行分析
+            analyzer = PlotAnalyzer(use_map_reduce=True)
+            result = await analyzer.analyze(content, outline, progress_callback=progress_callback)
+
+            # 再次检查是否已被取消
+            if analysis_tasks[task_id].get('status') == 'cancelled':
+                logger.info(f"情节分析任务在完成前被取消: {task_id}")
+                return
+
+            # 保存结果
+            analysis_tasks[task_id]['result'] = result
+            analysis_tasks[task_id]['status'] = 'completed'
+            analysis_tasks[task_id]['progress']['status'] = 'completed'
+            analysis_tasks[task_id]['progress']['progress_percent'] = 100
+            _persist_task(task_id, db)
+
+            logger.info(f"情节分析任务完成: {task_id}, 识别 {len(result)} 个情节")
+
+        except Exception as e:
+            logger.error(f"情节分析任务失败: {task_id}, {e}")
             analysis_tasks[task_id]['status'] = 'failed'
-            analysis_tasks[task_id]['error'] = '小说不存在'
-            return
-
-        content = ""
-        outline = ""
-        if novel.content_path:
-            content = safe_read_file(novel.content_path)
-        if novel.outline_path:
-            outline = safe_read_file(novel.outline_path)
-
-        if not content:
-            analysis_tasks[task_id]['status'] = 'failed'
-            analysis_tasks[task_id]['error'] = '小说内容为空'
-            return
-
-        # 初始化进度
-        analysis_tasks[task_id]['progress'] = {
-            'total_chunks': 0,
-            'completed_chunks': 0,
-            'progress_percent': 0,
-            'status': 'in_progress'
-        }
-
-        # 创建进度回调
-        def progress_callback(p: AnalysisProgress):
-            update_task_progress(task_id, p)
-
-        # 执行分析
-        analyzer = PlotAnalyzer(use_map_reduce=True)
-        result = await analyzer.analyze(content, outline, progress_callback=progress_callback)
-
-        # 保存结果
-        analysis_tasks[task_id]['result'] = result
-        analysis_tasks[task_id]['status'] = 'completed'
-        analysis_tasks[task_id]['progress']['status'] = 'completed'
-        analysis_tasks[task_id]['progress']['progress_percent'] = 100
-        _persist_task(task_id, db)
-
-        logger.info(f"情节分析任务完成: {task_id}, 识别 {len(result)} 个情节")
-
-    except Exception as e:
-        logger.error(f"情节分析任务失败: {task_id}, {e}")
-        analysis_tasks[task_id]['status'] = 'failed'
-        analysis_tasks[task_id]['error'] = str(e)
-        _persist_task(task_id, db)
+            analysis_tasks[task_id]['error'] = str(e)
+            _persist_task(task_id, db)
 
 
 @router.post("/analyze/{novel_id}/async", response_model=AnalysisStartResponse)
@@ -280,11 +304,11 @@ async def start_async_analysis(
     # 持久化新任务
     _persist_task(task_id, db)
 
-    # 添加后台任务
+    # 添加后台任务（不传 db session，后台任务自行创建）
     if analysis_type == 'character':
-        background_tasks.add_task(run_character_analysis, task_id, novel_id, db)
+        background_tasks.add_task(run_character_analysis, task_id, novel_id)
     else:
-        background_tasks.add_task(run_plot_analysis, task_id, novel_id, db)
+        background_tasks.add_task(run_plot_analysis, task_id, novel_id)
 
     logger.info(f"启动{analysis_type}分析任务: {task_id}")
 

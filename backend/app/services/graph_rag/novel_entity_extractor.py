@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from anthropic import Anthropic
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -166,14 +166,14 @@ class NovelEntityExtractor:
         max_gleanings: int = 1,
         entity_types: List[str] = None
     ):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.base_url = base_url or settings.ANTHROPIC_BASE_URL
-        self.model = model or settings.CLAUDE_MODEL
+        self.api_key = api_key or settings.DEEPSEEK_API_KEY
+        self.base_url = base_url or settings.DEEPSEEK_BASE_URL
+        self.model = model or settings.DEEPSEEK_MODEL
         self.max_gleanings = max_gleanings
         self.entity_types = entity_types or self.DEFAULT_ENTITY_TYPES
 
         if self.api_key:
-            self.client = Anthropic(
+            self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
@@ -297,12 +297,12 @@ class NovelEntityExtractor:
     def _call_llm(self, prompt: str, max_tokens: int = 3000) -> str:
         """调用 LLM"""
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return response.content[0].text
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")
             return ""

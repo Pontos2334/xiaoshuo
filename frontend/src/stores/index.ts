@@ -49,6 +49,7 @@ export const useCharacterStore = create<CharacterState>((set) => ({
   })),
   deleteCharacter: (id) => set((state) => ({
     characters: state.characters.filter((c) => c.id !== id),
+    relations: state.relations.filter((r) => r.sourceId !== id && r.targetId !== id),
   })),
   addRelation: (relation) => set((state) => ({ relations: [...state.relations, relation] })),
   updateRelation: (id, data) => set((state) => ({

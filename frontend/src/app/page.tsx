@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
@@ -53,6 +54,8 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [analyzeMode, setAnalyzeMode] = useState<AnalyzeMode>('incremental');
+  const [analysisProgress, setAnalysisProgress] = useState({ percent: 0, current: 0, total: 0, message: '' });
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
 
   // Ctrl+K 快捷键监听
@@ -158,58 +161,109 @@ export default function Home() {
     return () => {
       abortController.abort();
     };
-  }, [currentNovel?.id, setCharacters, setRelations, setPlotNodes, setPlotConnections, clearInspirations, addInspiration]);
+  }, [currentNovel?.id, setCharacters, setRelations, setPlotNodes, setPlotConnections, clearInspirations, addInspiration]); // Zustand setters are stable references
 
-  // AI分析人物
-  const handleAnalyzeCharacters = async (mode?: AnalyzeMode) => {
-    const actualMode = mode || analyzeMode;
-    if (!currentNovel) {
-      toast.error('请先打开文件夹选择小说');
-      return;
+  // 取消分析
+  const cancelAnalysis = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
+    setIsAnalyzing(false);
+    setAnalysisProgress({ percent: 0, current: 0, total: 0, message: '' });
+    toast.info('已取消分析');
+  };
+
+  // 通用 SSE 流式分析
+  const handleSSEAnalysis = async (endpoint: string, type: 'characters' | 'plots') => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setIsAnalyzing(true);
-    setStatusMessage(actualMode === 'incremental' ? '正在增量分析人物...' : '正在全量分析人物...');
+    setAnalysisProgress({ percent: 0, current: 0, total: 0, message: '正在连接...' });
 
     try {
-      setStatusMessage('正在读取小说内容...');
-      const response = await fetchWithTimeout(
-        `${API_URL}/characters/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`,
-        { method: 'POST' },
-        180000 // 3分钟超时（长文本分析可能需要较长时间）
-      );
+      const response = await fetch(`${API_URL}/${endpoint}`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+      });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`服务器错误: ${response.status} - ${errorText}`);
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `服务器错误: ${response.status}`);
       }
 
-      setStatusMessage('正在解析人物信息...');
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应');
 
-      if (data.success) {
-        const characters = data.data?.characters || data.data || [];
-        setCharacters(characters);
-        const modeText = actualMode === 'incremental' ? '增量' : '全量';
-        setStatusMessage(`${modeText}分析完成！发现 ${characters.length} 个人物`);
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-        // 分析人物关系
-        setStatusMessage('正在分析人物关系...');
-        const relResponse = await fetchWithTimeout(
-          `${API_URL}/characters/relations/analyze?novel_id=${currentNovel.id}`,
-          { method: 'POST' },
-          120000 // 2分钟超时
-        );
-        const relData = await relResponse.json();
-        if (relData.success) {
-          setRelations(relData.data || []);
-          toast.success(`完成！${characters.length} 个人物，${relData.data?.length || 0} 个关系`);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+            if (data.step === 'progress') {
+              setAnalysisProgress({
+                percent: data.progress_percent || 0,
+                current: data.completed_chunks || 0,
+                total: data.total_chunks || 0,
+                message: `第 ${data.current_chunk_index || 0} 块 / 共 ${data.total_chunks || 0} 块`,
+              });
+            } else if (data.step === 'complete') {
+              const characters = data.data?.characters || data.data || [];
+              if (type === 'characters') {
+                setCharacters(characters);
+                // 人物分析完成后自动分析关系
+                if (characters.length > 0 && currentNovel?.id) {
+                  setAnalysisProgress({ percent: 100, current: 0, total: 0, message: '正在分析人物关系...' });
+                  try {
+                    const relRes = await fetch(`${API_URL}/characters/relations/analyze?novel_id=${currentNovel.id}`, {
+                      method: 'POST',
+                      signal: controller.signal,
+                      headers: { 'Content-Type': 'application/json' },
+                    });
+                    if (relRes.ok) {
+                      const relData = await relRes.json();
+                      if (relData.success && relData.data) {
+                        setRelations(relData.data);
+                        toast.success(`完成！${characters.length} 个人物，${relData.data.length} 个关系`);
+                      } else {
+                        toast.success(`完成！发现 ${characters.length} 个人物`);
+                      }
+                    } else {
+                      toast.success(`完成！发现 ${characters.length} 个人物`);
+                    }
+                  } catch {
+                    toast.success(`完成！发现 ${characters.length} 个人物`);
+                  }
+                } else {
+                  toast.success(`完成！发现 ${characters.length} 个人物`);
+                }
+                setAnalysisProgress({ percent: 100, current: 0, total: 0, message: '分析完成！' });
+              } else if (type === 'plots') {
+                setAnalysisProgress({ percent: 100, current: 0, total: 0, message: '分析完成！' });
+                const nodes = data.data?.nodes || data.data || [];
+                setPlotNodes(nodes);
+                toast.success(`完成！提取 ${nodes.length} 个情节节点`);
+              }
+            } else if (data.step === 'error') {
+              throw new Error(data.message || '分析失败');
+            }
+          }
         }
-      } else {
-        toast.error(`分析失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
-      console.error('分析人物失败:', error);
+      if ((error as Error).name === 'AbortError') return;
+      console.error('分析失败:', error);
       const errorMsg = (error as Error).message;
       if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
         toast.error('网络连接失败，请检查后端服务是否运行');
@@ -218,8 +272,21 @@ export default function Home() {
       }
     } finally {
       setIsAnalyzing(false);
-      setTimeout(() => setStatusMessage(''), 3000);
+      abortControllerRef.current = null;
     }
+  };
+
+  // AI分析人物
+  const handleAnalyzeCharacters = async (mode?: AnalyzeMode) => {
+    const actualMode = mode || analyzeMode;
+    if (!currentNovel) {
+      toast.error('请先打开文件夹选择小说');
+      return;
+    }
+    await handleSSEAnalysis(
+      `characters/analyze/stream?novel_id=${currentNovel.id}&mode=${actualMode}`,
+      'characters'
+    );
   };
 
   // AI分析情节
@@ -230,15 +297,18 @@ export default function Home() {
       return;
     }
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsAnalyzing(true);
-    setStatusMessage(actualMode === 'incremental' ? '正在增量分析情节...' : '正在全量分析情节...');
+    setAnalysisProgress({ percent: 0, current: 0, total: 0, message: actualMode === 'incremental' ? '正在增量分析情节...' : '正在全量分析情节...' });
 
     try {
-      setStatusMessage('正在读取小说内容...');
+      setAnalysisProgress({ percent: 0, current: 0, total: 0, message: '正在读取小说内容...' });
       const response = await fetchWithTimeout(
         `${API_URL}/plots/analyze?novel_id=${currentNovel.id}&mode=${actualMode}`,
-        { method: 'POST' },
-        180000 // 3分钟超时
+        { method: 'POST', signal: controller.signal },
+        180000
       );
 
       if (!response.ok) {
@@ -246,21 +316,18 @@ export default function Home() {
         throw new Error(`服务器错误: ${response.status} - ${errorText}`);
       }
 
-      setStatusMessage('正在解析情节节点...');
+      setAnalysisProgress({ percent: 50, current: 0, total: 0, message: '正在解析情节节点...' });
       const data = await response.json();
 
       if (data.success) {
         const nodes = data.data?.nodes || data.data || [];
         setPlotNodes(nodes);
         const modeText = actualMode === 'incremental' ? '增量' : '全量';
-        setStatusMessage(`${modeText}分析完成！发现 ${nodes.length} 个情节节点`);
-
-        // 分析情节连接
-        setStatusMessage('正在分析情节关联...');
+        setAnalysisProgress({ percent: 80, current: 0, total: 0, message: `${modeText}分析完成！发现 ${nodes.length} 个情节节点` });
         const connResponse = await fetchWithTimeout(
           `${API_URL}/plots/connections/analyze?novel_id=${currentNovel.id}`,
-          { method: 'POST' },
-          120000 // 2分钟超时
+          { method: 'POST', signal: controller.signal },
+          120000
         );
         const connData = await connResponse.json();
         if (connData.success) {
@@ -271,6 +338,7 @@ export default function Home() {
         toast.error(`分析失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
+      if ((error as Error).name === 'AbortError') return;
       console.error('分析情节失败:', error);
       const errorMsg = (error as Error).message;
       if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
@@ -280,7 +348,7 @@ export default function Home() {
       }
     } finally {
       setIsAnalyzing(false);
-      setTimeout(() => setStatusMessage(''), 3000);
+      abortControllerRef.current = null;
     }
   };
 
@@ -346,6 +414,8 @@ export default function Home() {
           isAnalyzing={isAnalyzing}
           analyzeMode={analyzeMode}
           setAnalyzeMode={setAnalyzeMode}
+          progress={analysisProgress}
+          onCancel={cancelAnalysis}
         />
       )}
       {activeTab === 'plots' && (

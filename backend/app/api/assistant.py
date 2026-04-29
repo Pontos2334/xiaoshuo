@@ -16,7 +16,7 @@ from ..services.creative_helper import CreativeHelper
 from ..models.database import get_db
 from ..models.models import Novel, Character, PlotNode
 
-router = APIRouter(prefix="/assistant", tags=["assistant"])
+router = APIRouter(tags=["assistant"])
 logger = logging.getLogger(__name__)
 
 

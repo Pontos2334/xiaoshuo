@@ -3,6 +3,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from fastapi import Depends
 import os
+import re
 from typing import List
 from pydantic import BaseModel
 import uuid
@@ -15,6 +16,21 @@ from app.core.file_utils import safe_read_file, safe_write_file
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _sync_neo4j_novel(novel_id: str, name: str, path: str, content_path: str, chapter_count: int, word_count: int):
+    """在 Neo4j 中同步创建 Novel 节点（忽略失败）"""
+    try:
+        from app.db.repository import novel_repo
+        novel_repo.create({
+            'name': name,
+            'path': path,
+            'content_path': content_path,
+            'chapter_count': chapter_count,
+            'word_count': word_count,
+        })
+    except Exception as e:
+        logger.warning(f"Neo4j 同步 Novel 节点失败（不影响主流程）: {e}")
 
 
 class FileContent(BaseModel):
@@ -100,6 +116,15 @@ async def delete_novel(novel_id: str, db: Session = Depends(get_db)):
         except Exception as e:
             logger.warning(f"删除小说文件失败: {e}")
 
+    # 8. 清理 Qdrant 向量集合
+    try:
+        from app.services.vector.qdrant_service import get_qdrant_service
+        qdrant = get_qdrant_service()
+        qdrant.delete_collection(novel_id)
+        logger.info(f"已删除 Qdrant 向量集合: {novel_id}")
+    except Exception as e:
+        logger.warning(f"删除 Qdrant 向量集合失败: {e}")
+
     return ApiResponse(
         success=True,
         data={"message": f"已删除小说《{novel_name}》"}
@@ -161,8 +186,9 @@ async def scan_folder(path: str, db: Session = Depends(get_db)):
                 try:
                     content = safe_read_file(file_path)
                     word_count = len(content)
-                    # 简单估算章节数
-                    chapter_count = content.count("第") if "第" in content else 1
+                    # 通过正则匹配章节标题估算章节数
+                    chapter_matches = re.findall(r'第[一二三四五六七八九十百千\d]+[章回节]', content)
+                    chapter_count = len(chapter_matches) if chapter_matches else 1
                 except IOError as e:
                     logger.warning(f"跳过无法读取的文件: {file_path}, 错误: {e}")
                     continue
@@ -177,6 +203,8 @@ async def scan_folder(path: str, db: Session = Depends(get_db)):
                 db.add(new_novel)
                 db.commit()
                 db.refresh(new_novel)
+                _sync_neo4j_novel(new_novel.id, new_novel.name, new_novel.path,
+                                  new_novel.content_path, new_novel.chapter_count, new_novel.word_count)
                 novels.append(NovelResponse.model_validate(new_novel))
 
     return ApiResponse(
@@ -190,6 +218,21 @@ async def upload_folder(request: FolderUploadRequest, db: Session = Depends(get_
     """接收从前端上传的文件夹内容，一个文件夹作为一部小说"""
     if not request.files:
         return ApiResponse(success=False, error="文件夹中没有文件")
+
+    # 文件数量限制
+    if len(request.files) > 100:
+        return ApiResponse(success=False, error="文件数量超过限制（最多100个）")
+
+    # 总大小限制 (50MB)
+    MAX_TOTAL_SIZE = 50 * 1024 * 1024
+    total_size = sum(f.size for f in request.files)
+    if total_size > MAX_TOTAL_SIZE:
+        return ApiResponse(success=False, error=f"文件总大小超过限制（{MAX_TOTAL_SIZE // (1024*1024)}MB）")
+
+    # 检查内容不含 null 字节（非文本文件）
+    for f in request.files:
+        if '\x00' in f.content:
+            return ApiResponse(success=False, error=f"文件 '{f.name}' 包含非文本内容")
 
     # 创建目录保存小说
     data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "novels")
@@ -223,7 +266,8 @@ async def upload_folder(request: FolderUploadRequest, db: Session = Depends(get_
         )
 
     # 估算章节数
-    chapter_count = all_content.count("第") if "第" in all_content else len(request.files)
+    chapter_matches = re.findall(r'第[一二三四五六七八九十百千\d]+[章回节]', all_content)
+    chapter_count = len(chapter_matches) if chapter_matches else len(request.files)
 
     new_novel = Novel(
         id=str(uuid.uuid4()),
@@ -236,6 +280,8 @@ async def upload_folder(request: FolderUploadRequest, db: Session = Depends(get_
     db.add(new_novel)
     db.commit()
     db.refresh(new_novel)
+    _sync_neo4j_novel(new_novel.id, new_novel.name, new_novel.path,
+                      new_novel.content_path, new_novel.chapter_count, new_novel.word_count)
 
     return ApiResponse(
         success=True,

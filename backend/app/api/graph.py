@@ -12,7 +12,7 @@ import logging
 from ..services.graph_rag.novel_graph_builder import NovelGraphBuilder
 from ..services.graph_rag.novel_ontology_generator import NovelOntologyGenerator, DEFAULT_NOVEL_ONTOLOGY
 
-router = APIRouter(prefix="/graph", tags=["graph"])
+router = APIRouter(tags=["graph"])
 logger = logging.getLogger(__name__)
 
 
@@ -53,6 +53,21 @@ async def build_graph(request: BuildGraphRequest):
     从小说文本中抽取实体和关系，构建知识图谱
     """
     try:
+        # 如果没有提供文本，从数据库自动读取
+        if not request.text:
+            from ..models.database import SessionLocal
+            from ..models.models import Novel
+            from ..core.file_utils import safe_read_file
+            db = SessionLocal()
+            try:
+                novel = db.query(Novel).filter(Novel.id == request.novel_id).first()
+                if novel and novel.content_path:
+                    request.text = safe_read_file(novel.content_path)
+            finally:
+                db.close()
+        if not request.text:
+            raise HTTPException(status_code=400, detail="需要提供文本或有效的小说ID")
+
         builder = NovelGraphBuilder()
         result = builder.build(
             novel_id=request.novel_id,

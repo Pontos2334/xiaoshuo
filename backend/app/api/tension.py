@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 import json
-import re
 
 from app.models.database import get_db
 from app.models.models import Novel, Chapter, TensionPoint
@@ -13,6 +12,7 @@ from app.models.schemas import (
     TensionPointCreate, TensionPointUpdate, TensionPointResponse, ApiResponse
 )
 from app.core.file_utils import safe_read_file
+from app.core.json_utils import JSONParser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ async def analyze_tension(novel_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "tension_points" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -296,7 +296,7 @@ async def detect_pacing_issues(novel_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -403,7 +403,7 @@ async def suggest_cliffhanger(
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "suggestions" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -419,14 +419,3 @@ async def suggest_cliffhanger(
         logger.error(f"悬念建议失败: {e}")
         return ApiResponse(success=False, error=str(e))
 
-
-def _parse_json_response(text: str) -> Optional[dict]:
-    """解析AI返回的JSON，支持```json包裹"""
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return None

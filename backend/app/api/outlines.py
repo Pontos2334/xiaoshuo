@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import logging
 import json
-import re
 
 from app.models.database import get_db
 from app.models.models import Novel, OutlineNode
@@ -13,6 +12,7 @@ from app.models.schemas import (
     OutlineNodeCreate, OutlineNodeUpdate, OutlineNodeResponse, ApiResponse
 )
 from app.core.file_utils import safe_read_file
+from app.core.json_utils import JSONParser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -217,7 +217,7 @@ async def generate_master_outline(novel_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "outline" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -286,7 +286,7 @@ async def breakdown_outline_node(node_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data or "children" not in data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -388,7 +388,7 @@ async def expand_outline_node(node_id: str, db: Session = Depends(get_db)):
         if not response:
             return ApiResponse(success=False, error="AI生成失败")
 
-        data = _parse_json_response(response)
+        data = JSONParser.safe_parse_json(response)
         if not data:
             return ApiResponse(success=False, error="AI响应格式错误")
 
@@ -508,14 +508,3 @@ def _save_outline_tree(
 
     return saved
 
-
-def _parse_json_response(text: str) -> Optional[dict]:
-    """解析AI返回的JSON，支持```json包裹"""
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return None

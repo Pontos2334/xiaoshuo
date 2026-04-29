@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import files, characters, plots, inspiration, search, graph, chat, assistant, analysis, chapters, worldbuilding, foreshadows, character_arcs, tension, outlines
@@ -14,13 +16,27 @@ from app.core.exceptions import (
 # 初始化日志
 setup_logging(level="INFO")
 
-# 创建数据库表
-Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动：创建数据库表
+    Base.metadata.create_all(bind=engine)
+    yield
+    # 关闭：清理资源
+    try:
+        from app.db.neo4j_client import neo4j_client
+        if neo4j_client.driver:
+            neo4j_client.driver.close()
+    except Exception:
+        pass
+    engine.dispose()
+
 
 app = FastAPI(
     title="小说创作助手 API",
     description="AI辅助小说创作的后端服务",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # 注册全局异常处理器
@@ -80,10 +96,15 @@ async def health():
     try:
         from app.db.neo4j_client import neo4j_client
         if neo4j_client.driver:
-            neo4j_client.run("RETURN 1")
+            await asyncio.wait_for(
+                asyncio.to_thread(neo4j_client.run, "RETURN 1"),
+                timeout=5.0
+            )
             status["services"]["neo4j"] = "connected"
         else:
             status["services"]["neo4j"] = "not_configured"
+    except asyncio.TimeoutError:
+        status["services"]["neo4j"] = "timeout"
     except Exception as e:
         status["services"]["neo4j"] = f"error: {e}"
 

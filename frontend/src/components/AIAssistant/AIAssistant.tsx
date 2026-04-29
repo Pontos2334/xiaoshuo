@@ -21,6 +21,7 @@ import {
   Lightbulb,
   Flame,
 } from 'lucide-react';
+import { useCharacterStore, usePlotStore } from '@/stores';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -168,6 +169,10 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
   const [contexts, setContexts] = useState<Record<string, string>>({});
   const [satisfactionType, setSatisfactionType] = useState<string>('打脸');
 
+  const characters = useCharacterStore((s) => s.characters);
+  const relations = useCharacterStore((s) => s.relations);
+  const plotNodes = usePlotStore((s) => s.plotNodes);
+
   // -------------------------------------------------------------------------
   // Generic generate handler
   // -------------------------------------------------------------------------
@@ -183,6 +188,12 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
         }
         if (tab.key === 'satisfaction') {
           body.type = satisfactionType;
+        }
+        // 为需要情节/角色数据的端点补充必填字段
+        if (tab.key === 'predict' || tab.key === 'advice') {
+          body.plots = plotNodes;
+          body.characters = characters;
+          body.relations = relations;
         }
 
         const res = await fetch(`${API_URL}${tab.endpoint}`, {
@@ -206,7 +217,7 @@ export function AIAssistant({ novelId, novelName }: AIAssistantProps) {
         setLoadingTab(null);
       }
     },
-    [novelId, contexts, satisfactionType],
+    [novelId, contexts, satisfactionType, characters, relations, plotNodes],
   );
 
   // =========================================================================
