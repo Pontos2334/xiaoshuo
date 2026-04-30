@@ -13,6 +13,7 @@ from app.models.schemas import (
 )
 from app.core.file_utils import safe_read_file
 from app.core.json_utils import JSONParser
+from app.core.text_sampler import sample_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ async def update_foreshadow(
     if not foreshadow:
         raise HTTPException(status_code=404, detail="伏笔不存在")
 
-    update_dict = update.model_dump(exclude_none=True)
+    update_dict = update.model_dump(exclude_unset=True)
     for key, value in update_dict.items():
         setattr(foreshadow, key, value)
 
@@ -142,8 +143,8 @@ async def extract_foreshadows(novel_id: str, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    # 按章节拆分内容，限制文本长度
-    text_sample = content[:8000]
+    # 采样文本（均匀分布，覆盖全文）
+    text_sample = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient
@@ -258,7 +259,7 @@ async def check_foreshadow_resolution(novel_id: str, db: Session = Depends(get_d
             f"状态: {f.status}, 描述: {f.description or '无'}"
         )
 
-    text_sample = content[:8000]
+    text_sample = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient
@@ -342,7 +343,7 @@ async def suggest_foreshadow_resolution(
         raise HTTPException(status_code=404, detail="小说不存在")
 
     content = safe_read_file(novel.content_path) if novel.content_path else ""
-    text_sample = content[:6000] if content else ""
+    text_sample = sample_text(content, 6000) if content else ""
 
     # 获取相关人物信息
     characters_str = ""

@@ -1,82 +1,37 @@
 """
-共享 LLM 客户端工厂
+共享 LLM 客户端（兼容层）
 
-统一管理 DeepSeek API（OpenAI SDK 兼容）客户端实例，避免各服务重复创建
+保留此文件以兼容现有导入，实际逻辑已合并到 agent/client.py
 """
 
-import asyncio
-import logging
-from typing import Optional
-from openai import OpenAI
+from app.agent.client import AIAgentClient, get_ai_client
 
-from app.core.config import settings
-
-logger = logging.getLogger(__name__)
-
-
+# 兼容旧代码的工厂类
 class LLMClientFactory:
-    """LLM 客户端工厂（单例模式）"""
-
-    _instance: Optional["LLMClientFactory"] = None
-    _client: Optional[OpenAI] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init_client()
-        return cls._instance
-
-    def _init_client(self):
-        if settings.DEEPSEEK_API_KEY:
-            self._client = OpenAI(
-                api_key=settings.DEEPSEEK_API_KEY,
-                base_url=settings.DEEPSEEK_BASE_URL,
-            )
-            logger.info(f"LLM 客户端初始化: model={settings.DEEPSEEK_MODEL}, base_url={settings.DEEPSEEK_BASE_URL}")
-        else:
-            self._client = None
-            logger.warning("未配置 DEEPSEEK_API_KEY")
+    """LLM 客户端工厂（兼容层，已弃用，请直接使用 get_ai_client()）"""
 
     @property
-    def client(self) -> Optional[OpenAI]:
-        return self._client
+    def client(self):
+        return get_ai_client().client
 
     @property
-    def model(self) -> str:
-        return settings.DEEPSEEK_MODEL
+    def model(self):
+        return get_ai_client().model
 
     @property
-    def max_tokens(self) -> int:
-        return settings.MAX_TOKENS
+    def max_tokens(self):
+        return get_ai_client().max_tokens
 
     @property
-    def is_available(self) -> bool:
-        return self._client is not None
+    def is_available(self):
+        return get_ai_client().is_available
 
-    def generate_sync(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """同步生成"""
-        if not self._client:
-            raise RuntimeError("LLM 客户端未初始化")
+    def generate_sync(self, prompt, system_prompt=None):
+        return get_ai_client().generate_sync(prompt, system_prompt)
 
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        else:
-            messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
-        messages.append({"role": "user", "content": prompt})
-
-        response = self._client.chat.completions.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=messages,
-            extra_body={"thinking": {"type": "enabled"}},
-        )
-        return response.choices[0].message.content
-
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """异步生成（使用 asyncio.to_thread 避免阻塞事件循环）"""
-        return await asyncio.to_thread(self.generate_sync, prompt, system_prompt)
+    async def generate(self, prompt, system_prompt=None):
+        return await get_ai_client().generate(prompt, system_prompt)
 
 
-# 全局单例
+# 全局单例（兼容）
 llm_factory = LLMClientFactory()

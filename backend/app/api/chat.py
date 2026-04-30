@@ -2,6 +2,13 @@
 人物对话 API
 
 提供与小说人物对话的功能
+
+TODO: 当前会话完全在内存中，服务重启后丢失。
+      ChatSession 模型已在 models.py 中定义，需要将 chat_engine 的会话持久化到 SQLite。
+      步骤：
+      1. create_session 时同时写入 ChatSession 表
+      2. send_message 时更新 ChatSession.messages
+      3. 服务启动时从 DB 恢复活跃会话
 """
 
 from fastapi import APIRouter, HTTPException

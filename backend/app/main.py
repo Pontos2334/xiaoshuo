@@ -12,6 +12,7 @@ from app.core.exceptions import (
     http_exception_handler,
     generic_exception_handler
 )
+from app.core.security import APIKeyMiddleware
 
 # 初始化日志
 setup_logging(level="INFO")
@@ -50,9 +51,12 @@ app.add_middleware(
     allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-API-Key"],
     max_age=600,
 )
+
+# API Key 认证中间件（配置 API_KEY 后启用）
+app.add_middleware(APIKeyMiddleware)
 
 # 注册路由
 app.include_router(files.router, prefix="/api/files", tags=["文件"])

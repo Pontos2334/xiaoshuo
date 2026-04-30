@@ -16,6 +16,7 @@ from app.models.schemas import (
 )
 from app.core.file_utils import safe_read_file
 from app.core.json_utils import JSONParser
+from app.core.text_sampler import sample_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -105,9 +106,14 @@ async def delete_entity(entity_id: str, db: Session = Depends(get_db)):
     if not entity:
         raise HTTPException(status_code=404, detail="实体不存在")
 
+    # 先删除引用该实体的所有关系
+    db.query(EntityRelation).filter(
+        (EntityRelation.source_id == entity_id) | (EntityRelation.target_id == entity_id)
+    ).delete(synchronize_session=False)
+
     db.delete(entity)
     db.commit()
-    return ApiResponse(success=True, data={"message": f"已删除实体「{entity.name}」"})
+    return ApiResponse(success=True, data={"message": f"已删除实体「{entity.name}」及其关联关系"})
 
 
 # ========== 实体关系 CRUD ==========
@@ -222,7 +228,7 @@ async def extract_entities(novel_id: str, entity_type: Optional[str] = None, db:
         return ApiResponse(success=False, error="小说内容为空")
 
     # 限制文本长度，取前8000字
-    text_sample = content[:8000]
+    text_sample = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient
@@ -310,7 +316,7 @@ async def auto_extract_terminology(novel_id: str, db: Session = Depends(get_db))
     if not content:
         return ApiResponse(success=False, error="小说内容为空")
 
-    text_sample = content[:8000]
+    text_sample = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient

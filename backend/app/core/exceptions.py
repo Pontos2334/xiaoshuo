@@ -90,12 +90,8 @@ async def generic_exception_handler(request: Request, exc: Exception):
             content={"success": False, "error": "服务器内部错误", "code": "INTERNAL_ERROR"}
         ), request)
     except Exception:
-        # 极限兜底：确保无论如何都返回带 CORS 头的响应
+        # 极限兜底：返回不带 CORS 头的响应（浏览器会根据中间件配置处理）
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": "服务器内部错误", "code": "INTERNAL_ERROR"},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Credentials": "true",
-            }
         )

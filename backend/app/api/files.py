@@ -13,6 +13,7 @@ from app.models.database import get_db
 from app.models.models import Novel, Character, CharacterRelation, PlotNode, PlotConnection, Inspiration
 from app.models.schemas import NovelResponse, NovelCreate, ApiResponse
 from app.core.file_utils import safe_read_file, safe_write_file
+from app.core.security import validate_scan_path
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -159,6 +160,12 @@ async def export_novel(novel_id: str, db: Session = Depends(get_db)):
 @router.post("/scan", response_model=ApiResponse)
 async def scan_folder(path: str, db: Session = Depends(get_db)):
     """扫描指定文件夹，查找小说文件"""
+    # 安全校验：验证路径合法性
+    try:
+        path = validate_scan_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not os.path.exists(path):
         raise HTTPException(status_code=400, detail="文件夹不存在")
 

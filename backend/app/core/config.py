@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = ""
+    NEO4J_ENABLED: bool = False  # 是否启用 Neo4j（SQLite 为主数据源）
 
     # Qdrant 配置
     QDRANT_URL: str = "http://localhost:6333"
@@ -48,6 +49,10 @@ class Settings(BaseSettings):
     # GraphRAG 配置
     GRAPH_RAG_MAX_GLEANINGS: int = 1
     GRAPH_RAG_CHUNK_SIZE: int = 2000
+
+    # 安全配置
+    API_KEY: str = ""  # 可选的 API Key 认证，为空则不启用
+    SCAN_ALLOWED_ROOTS: str = ""  # 允许扫描的根目录（逗号分隔），为空则不限制（仅开发模式）
 
     # 长文本处理配置
     LONG_TEXT_THRESHOLD: int = 15000      # 触发 Map-Reduce 的字符阈值

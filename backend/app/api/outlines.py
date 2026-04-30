@@ -13,6 +13,7 @@ from app.models.schemas import (
 )
 from app.core.file_utils import safe_read_file
 from app.core.json_utils import JSONParser
+from app.core.text_sampler import sample_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ async def generate_master_outline(novel_id: str, db: Session = Depends(get_db)):
     if not content:
         return ApiResponse(success=False, error="小说内容为空")
 
-    text_sample = content[:8000]
+    text_sample = sample_text(content, 8000)
 
     # 获取已有的人物和情节信息作为上下文
     from app.models.models import Character, PlotNode
@@ -244,7 +245,7 @@ async def breakdown_outline_node(node_id: str, db: Session = Depends(get_db)):
 
     novel = db.query(Novel).filter(Novel.id == node.novel_id).first()
     content = safe_read_file(novel.content_path) if novel and novel.content_path else ""
-    text_sample = content[:4000] if content else "（无小说文本）"
+    text_sample = sample_text(content, 4000) if content else "（无小说文本）"
 
     try:
         from app.agent.client import ClaudeAgentClient
@@ -331,7 +332,7 @@ async def expand_outline_node(node_id: str, db: Session = Depends(get_db)):
 
     novel = db.query(Novel).filter(Novel.id == node.novel_id).first()
     content = safe_read_file(novel.content_path) if novel and novel.content_path else ""
-    text_sample = content[:4000] if content else "（无小说文本）"
+    text_sample = sample_text(content, 4000) if content else "（无小说文本）"
 
     # 获取兄弟节点作为上下文
     siblings = []

@@ -7,6 +7,7 @@ import { MainLayout } from '@/components/Layout/MainLayout';
 import { CharacterGraph } from '@/components/CharacterGraph/CharacterGraph';
 import { PlotGraph } from '@/components/PlotGraph/PlotGraph';
 import { InspirationPanel } from '@/components/InspirationPanel/InspirationPanel';
+import LoadingFallback from '@/components/LoadingFallback';
 
 const VectorSearch = lazy(() => import('@/components/VectorSearch/VectorSearch').then(m => ({ default: m.VectorSearch })));
 const KnowledgeGraph = lazy(() => import('@/components/KnowledgeGraph/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
@@ -21,28 +22,8 @@ const CharacterQuickSearchComp = lazy(() => import('@/components/CharacterQuickS
 
 import { useUIStore, useCharacterStore, usePlotStore, useInspirationStore, useNovelStore } from '@/stores';
 import { API_URL } from '@/lib/constants';
+import { fetchWithTimeout } from '@/lib/api';
 import { AnalyzeMode } from '@/types';
-
-// 带超时的 fetch 工具函数
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 120000) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('请求超时，请稍后重试');
-    }
-    throw error;
-  }
-};
 
 export default function Home() {
   const { activeTab } = useUIStore();
@@ -161,7 +142,7 @@ export default function Home() {
     return () => {
       abortController.abort();
     };
-  }, [currentNovel?.id, setCharacters, setRelations, setPlotNodes, setPlotConnections, clearInspirations, addInspiration]); // Zustand setters are stable references
+  }, [currentNovel?.id]); // Zustand setters are stable references, no need to list
 
   // 取消分析
   const cancelAnalysis = () => {
@@ -430,47 +411,47 @@ export default function Home() {
         <InspirationPanel onGenerateInspiration={handleGenerateInspiration} isAnalyzing={isAnalyzing} />
       )}
       {activeTab === 'search' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <VectorSearch novelId={currentNovel.id} />
         </Suspense>
       )}
       {activeTab === 'knowledge' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <KnowledgeGraph novelId={currentNovel.id} novelName={currentNovel.name} />
         </Suspense>
       )}
       {activeTab === 'chat' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <CharacterChat novelId={currentNovel.id} novelName={currentNovel.name} />
         </Suspense>
       )}
       {activeTab === 'assistant' && currentNovel && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <AIAssistant novelId={currentNovel.id} novelName={currentNovel.name} />
         </Suspense>
       )}
       {activeTab === 'worldbuilding' && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <WorldBuildingComp />
         </Suspense>
       )}
       {activeTab === 'foreshadow' && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <ForeshadowTrackerComp />
         </Suspense>
       )}
       {activeTab === 'arcs' && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <CharacterArcComp />
         </Suspense>
       )}
       {activeTab === 'tension' && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <TensionCurveComp />
         </Suspense>
       )}
       {activeTab === 'outline' && (
-        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-3 text-muted-foreground"><svg className="animate-spin h-5 w-5 text-primary/50" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg><span className="text-sm">加载中...</span></div></div>}>
+        <Suspense fallback={<LoadingFallback />}>
           <OutlineWorkflowComp />
         </Suspense>
       )}

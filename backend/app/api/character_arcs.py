@@ -14,6 +14,7 @@ from app.models.schemas import (
 )
 from app.core.file_utils import safe_read_file
 from app.core.json_utils import JSONParser
+from app.core.text_sampler import sample_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -141,7 +142,7 @@ async def extract_arc_points(
     if not characters:
         return ApiResponse(success=False, error="没有可分析的人物")
 
-    text_sample = content[:8000]
+    text_sample = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient

@@ -592,6 +592,11 @@ async def analyze_characters_stream(
 
     current_version = (novel.analysis_version or 0) + 1
     last_analyzed_chapter = novel.last_analyzed_chapter or 0
+
+    # 提前读取 novel 数据并关闭 db session，避免 SQLite 锁冲突
+    # _run_analysis 使用独立 session 进行写入
+    db.close()
+
     analyzer = CharacterAnalyzer()
 
     # 用于取消任务的标志
@@ -665,96 +670,112 @@ async def _run_analysis(
     from app.services.chapter_splitter import chapter_splitter
     from app.models.models import Character, CharacterRelation
 
-    with SessionLocal() as db:
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
-        if not novel:
-            raise RuntimeError(f"小说不存在: {novel_id}")
+    try:
+        with SessionLocal() as db:
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
+            if not novel:
+                raise RuntimeError(f"小说不存在: {novel_id}")
 
-        if mode == 'incremental' and last_analyzed_chapter > 0:
-            # 增量模式
-            existing_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
-            existing_chars_data = []
-            for c in existing_characters:
-                existing_chars_data.append({
-                    'id': c.id, 'name': c.name, 'aliases': c.aliases or [],
-                    'basic_info': c.basic_info or {}, 'personality': c.personality or [],
-                    'abilities': c.abilities or [], 'story_summary': c.story_summary,
-                    'first_appear': c.first_appear, 'source': c.source or 'ai',
-                    'ai_version': c.ai_version or 1,
-                })
-            characters = await analyzer.analyze_incremental(
-                content, existing_chars_data,
-                last_analyzed_chapter + 1, current_version,
-                progress_callback=progress_callback
-            )
-            new_max_chapter = chapter_splitter.get_max_chapter_num(content)
-        else:
-            # 全量模式 - 清理旧数据
-            # 清理 Neo4j
-            try:
-                old_neo4j_chars = character_repo.get_by_novel(novel_id) or []
-                for old_char in old_neo4j_chars:
-                    try:
-                        character_repo.delete(old_char.get('id'))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            if mode == 'incremental' and last_analyzed_chapter > 0:
+                # 增量模式
+                existing_characters = db.query(Character).filter(Character.novel_id == novel_id).all()
+                existing_chars_data = []
+                for c in existing_characters:
+                    existing_chars_data.append({
+                        'id': c.id, 'name': c.name, 'aliases': c.aliases or [],
+                        'basic_info': c.basic_info or {}, 'personality': c.personality or [],
+                        'abilities': c.abilities or [], 'story_summary': c.story_summary,
+                        'first_appear': c.first_appear, 'source': c.source or 'ai',
+                        'ai_version': c.ai_version or 1,
+                    })
+                characters = await analyzer.analyze_incremental(
+                    content, existing_chars_data,
+                    last_analyzed_chapter + 1, current_version,
+                    progress_callback=progress_callback
+                )
+                new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+            else:
+                # 全量模式 - 清理旧数据
+                # 清理 Neo4j
+                try:
+                    old_neo4j_chars = character_repo.get_by_novel(novel_id) or []
+                    for old_char in old_neo4j_chars:
+                        try:
+                            character_repo.delete(old_char.get('id'))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-            db.query(CharacterRelation).filter(CharacterRelation.novel_id == novel_id).delete()
-            db.query(Character).filter(Character.novel_id == novel_id).delete()
-            db.commit()
+                db.query(CharacterRelation).filter(CharacterRelation.novel_id == novel_id).delete()
+                db.query(Character).filter(Character.novel_id == novel_id).delete()
+                db.commit()
 
-            raw_characters = await analyzer.analyze(content, progress_callback=progress_callback)
+                raw_characters = await analyzer.analyze(content, progress_callback=progress_callback)
 
-            # 去重合并
-            characters = []
-            seen_names = {}
-            for char in raw_characters:
-                name = char.get('name', '')
-                if not name:
-                    continue
-                normalized_name = re.sub(r'\s+', '', name.strip())
-                normalized_name = re.sub(r'[（(][^）)]*[）)]', '', normalized_name).strip()
-                if normalized_name in seen_names:
-                    existing = seen_names[normalized_name]
-                    for alias in char.get('aliases', []):
-                        if alias not in existing.get('aliases', []):
-                            existing['aliases'].append(alias)
-                    for p in char.get('personality', []):
-                        if p not in existing.get('personality', []):
-                            existing['personality'].append(p)
-                    for a in char.get('abilities', []):
-                        if a not in existing.get('abilities', []):
-                            existing['abilities'].append(a)
-                else:
-                    char['source'] = 'ai'
-                    char['ai_version'] = current_version
-                    characters.append(char)
-                    seen_names[normalized_name] = char
+                # 去重合并
+                characters = []
+                seen_names = {}
+                for char in raw_characters:
+                    name = char.get('name', '')
+                    if not name:
+                        continue
+                    normalized_name = re.sub(r'\s+', '', name.strip())
+                    normalized_name = re.sub(r'[（(][^）)]*[）)]', '', normalized_name).strip()
+                    if normalized_name in seen_names:
+                        existing = seen_names[normalized_name]
+                        for alias in char.get('aliases', []):
+                            if alias not in existing.get('aliases', []):
+                                existing['aliases'].append(alias)
+                        for p in char.get('personality', []):
+                            if p not in existing.get('personality', []):
+                                existing['personality'].append(p)
+                        for a in char.get('abilities', []):
+                            if a not in existing.get('abilities', []):
+                                existing['abilities'].append(a)
+                    else:
+                        char['source'] = 'ai'
+                        char['ai_version'] = current_version
+                        characters.append(char)
+                        seen_names[normalized_name] = char
 
-            new_max_chapter = chapter_splitter.get_max_chapter_num(content)
+                new_max_chapter = chapter_splitter.get_max_chapter_num(content)
 
-        # 保存到数据库
-        for char_data in characters:
-            try:
-                neo4j_data = {k: v for k, v in char_data.items() if k not in ['id', 'source', 'ai_version']}
-                result = character_repo.create(novel_id, neo4j_data)
-                if result:
-                    char_data['id'] = result.get('id')
-            except Exception as e:
-                logger.error(f"保存人物到 Neo4j 失败: {e}")
+            # 保存到数据库
+            for char_data in characters:
+                try:
+                    neo4j_data = {k: v for k, v in char_data.items() if k not in ['id', 'source', 'ai_version']}
+                    result = character_repo.create(novel_id, neo4j_data)
+                    if result:
+                        char_data['id'] = result.get('id')
+                except Exception as e:
+                    logger.error(f"保存人物到 Neo4j 失败: {e}")
 
-        for char_data in characters:
-            char_id = char_data.get('id')
-            if char_id:
-                existing = db.query(Character).filter(Character.id == char_id).first()
-                if existing:
-                    for key, value in char_data.items():
-                        if key not in ['id', 'source', 'ai_version']:
-                            setattr(existing, key, value)
-                    existing.source = char_data.get('source', 'ai')
-                    existing.ai_version = char_data.get('ai_version', current_version)
+            for char_data in characters:
+                char_id = char_data.get('id')
+                if char_id:
+                    existing = db.query(Character).filter(Character.id == char_id).first()
+                    if existing:
+                        for key, value in char_data.items():
+                            if key not in ['id', 'source', 'ai_version']:
+                                setattr(existing, key, value)
+                        existing.source = char_data.get('source', 'ai')
+                        existing.ai_version = char_data.get('ai_version', current_version)
+                    else:
+                        new_char = Character(
+                            novel_id=novel_id, name=char_data.get('name', ''),
+                            aliases=char_data.get('aliases', []),
+                            basic_info=char_data.get('basic_info', {}),
+                            personality=char_data.get('personality', []),
+                            abilities=char_data.get('abilities', []),
+                            story_summary=char_data.get('story_summary'),
+                            first_appear=char_data.get('first_appear'),
+                            source=char_data.get('source', 'ai'),
+                            ai_version=char_data.get('ai_version', current_version),
+                        )
+                        db.add(new_char)
+                        db.flush()
+                        char_data['id'] = new_char.id
                 else:
                     new_char = Character(
                         novel_id=novel_id, name=char_data.get('name', ''),
@@ -771,16 +792,21 @@ async def _run_analysis(
                     db.flush()
                     char_data['id'] = new_char.id
 
-        novel.last_analyzed_chapter = new_max_chapter
-        novel.analysis_version = current_version
-        db.commit()
+            novel.last_analyzed_chapter = new_max_chapter
+            novel.analysis_version = current_version
+            db.commit()
 
-    return {
-        'characters': characters,
-        'mode': mode,
-        'analyzed_chapter': new_max_chapter,
-        'version': current_version,
-    }
+            logger.info(f"_run_analysis 完成: {len(characters)} 个人物已保存")
+
+            return {
+                'characters': characters,
+                'mode': mode,
+                'analyzed_chapter': new_max_chapter,
+                'version': current_version,
+            }
+    except Exception as e:
+        logger.error(f"_run_analysis 失败: {type(e).__name__}: {e}", exc_info=True)
+        raise
 
 
 @router.get("/{character_id}", response_model=CharacterResponse)

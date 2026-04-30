@@ -16,6 +16,12 @@ class Neo4jClient:
         self.uri = settings.NEO4J_URI
         self.user = settings.NEO4J_USER
         self.password = settings.NEO4J_PASSWORD
+        self.driver = None
+
+        # 如果未启用 Neo4j，跳过连接
+        if not settings.NEO4J_ENABLED:
+            logger.info("Neo4j 未启用 (NEO4J_ENABLED=False)，使用 SQLite 作为唯一数据源")
+            return
 
         try:
             self.driver = GraphDatabase.driver(
@@ -28,6 +34,9 @@ class Neo4jClient:
             logger.info(f"Neo4j 连接成功: {self.uri}")
         except ServiceUnavailable as e:
             logger.error(f"Neo4j 连接失败: {e}")
+            self.driver = None
+        except Exception as e:
+            logger.warning(f"Neo4j 初始化异常: {e}")
             self.driver = None
 
     @classmethod

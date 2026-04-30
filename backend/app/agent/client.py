@@ -11,9 +11,22 @@ logger = logging.getLogger(__name__)
 
 
 class AIAgentClient:
-    """AI Agent客户端，基于 DeepSeek API（OpenAI SDK 兼容）"""
+    """
+    统一的 AI Agent 客户端（单例模式）
 
-    def __init__(self):
+    基于 DeepSeek API（OpenAI SDK 兼容），提供同步/异步生成能力。
+    所有服务共享同一个客户端实例。
+    """
+
+    _instance: Optional["AIAgentClient"] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._init()
+        return cls._instance
+
+    def _init(self):
         self.api_key = settings.DEEPSEEK_API_KEY
         self.base_url = settings.DEEPSEEK_BASE_URL
         self.model = settings.DEEPSEEK_MODEL
@@ -33,6 +46,10 @@ class AIAgentClient:
         else:
             self.client = None
             logger.warning("未配置 DEEPSEEK_API_KEY，将使用模拟响应")
+
+    @property
+    def is_available(self) -> bool:
+        return self.client is not None
 
     def _save_llm_log(self, prompt: str, response: str, error: Optional[str] = None, metadata: dict = None):
         """保存 LLM 调用日志"""
@@ -59,105 +76,102 @@ class AIAgentClient:
         except Exception as e:
             logger.warning(f"保存 LLM 日志失败: {e}")
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """生成响应（使用 asyncio.to_thread 避免阻塞事件循环）"""
-        if self.client:
-            try:
-                logger.info(f"调用 LLM: model={self.model}, prompt_length={len(prompt)}")
-
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                else:
-                    messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
-                messages.append({"role": "user", "content": prompt})
-
-                response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    messages=messages,
-                    timeout=120.0,
-                    extra_body={"thinking": {"type": "enabled"}}
-                )
-
-                if not response.choices or response.choices[0].message.content is None:
-                    raise RuntimeError("API 返回空响应或内容为 null")
-
-                response_text = response.choices[0].message.content
-                reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
-
-                logger.info(f"LLM 响应成功: response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
-
-                self._save_llm_log(
-                    prompt=prompt,
-                    response=response_text,
-                    metadata={
-                        "reasoning_content": reasoning_content[:500] + "..." if reasoning_content and len(reasoning_content) > 500 else reasoning_content,
-                        "reasoning_length": len(reasoning_content) if reasoning_content else 0,
-                        "usage": {
-                            "input_tokens": response.usage.prompt_tokens if response.usage else None,
-                            "output_tokens": response.usage.completion_tokens if response.usage else None
-                        }
-                    }
-                )
-
-                return response_text
-
-            except Exception as e:
-                error_msg = f"API 调用错误: {type(e).__name__}: {e}"
-                logger.error(error_msg)
-                self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": type(e).__name__})
-                raise RuntimeError(error_msg) from e
+    def _build_messages(self, prompt: str, system_prompt: Optional[str] = None) -> list:
+        """构建消息列表"""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         else:
-            # 仅在未配置 API key 时使用 demo 响应（用于开发测试）
+            messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """生成响应（异步，使用 asyncio.to_thread 避免阻塞事件循环）"""
+        if not self.client:
             return self._demo_response(prompt)
+
+        try:
+            logger.info(f"调用 LLM: model={self.model}, prompt_length={len(prompt)}")
+            messages = self._build_messages(prompt, system_prompt)
+
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=messages,
+                timeout=120.0,
+                extra_body={"thinking": {"type": "enabled"}}
+            )
+
+            if not response.choices or response.choices[0].message.content is None:
+                raise RuntimeError("API 返回空响应或内容为 null")
+
+            response_text = response.choices[0].message.content
+            reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
+
+            logger.info(f"LLM 响应成功: response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
+
+            self._save_llm_log(
+                prompt=prompt,
+                response=response_text,
+                metadata={
+                    "reasoning_content": reasoning_content[:500] + "..." if reasoning_content and len(reasoning_content) > 500 else reasoning_content,
+                    "reasoning_length": len(reasoning_content) if reasoning_content else 0,
+                    "usage": {
+                        "input_tokens": response.usage.prompt_tokens if response.usage else None,
+                        "output_tokens": response.usage.completion_tokens if response.usage else None
+                    }
+                }
+            )
+
+            return response_text
+
+        except Exception as e:
+            error_msg = f"API 调用错误: {type(e).__name__}: {e}"
+            logger.error(error_msg)
+            self._save_llm_log(prompt=prompt, response=None, error=error_msg, metadata={"error_type": type(e).__name__})
+            raise RuntimeError(error_msg) from e
 
     def generate_sync(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """同步生成响应"""
-        if self.client:
-            try:
-                logger.info(f"调用 LLM (sync): model={self.model}, prompt_length={len(prompt)}")
-
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                else:
-                    messages.append({"role": "system", "content": "你是一位专业的小说创作顾问，擅长分析文学作品和提供创作建议。请用中文回答。"})
-                messages.append({"role": "user", "content": prompt})
-
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    messages=messages,
-                    timeout=120.0,
-                    extra_body={"thinking": {"type": "enabled"}}
-                )
-
-                if not response.choices or response.choices[0].message.content is None:
-                    raise RuntimeError("API 返回空响应或内容为 null")
-
-                response_text = response.choices[0].message.content
-                reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
-                logger.info(f"LLM 响应成功 (sync): response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
-
-                self._save_llm_log(
-                    prompt=prompt,
-                    response=response_text,
-                    metadata={
-                        "reasoning_length": len(reasoning_content) if reasoning_content else 0
-                    }
-                )
-
-                return response_text
-
-            except Exception as e:
-                error_msg = f"API 调用错误: {type(e).__name__}: {e}"
-                logger.error(error_msg)
-                self._save_llm_log(prompt=prompt, response=None, error=error_msg)
-                raise RuntimeError(error_msg) from e
-        else:
+        if not self.client:
             return self._demo_response(prompt)
+
+        try:
+            logger.info(f"调用 LLM (sync): model={self.model}, prompt_length={len(prompt)}")
+            messages = self._build_messages(prompt, system_prompt)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=messages,
+                timeout=120.0,
+                extra_body={"thinking": {"type": "enabled"}}
+            )
+
+            if not response.choices or response.choices[0].message.content is None:
+                raise RuntimeError("API 返回空响应或内容为 null")
+
+            response_text = response.choices[0].message.content
+            reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
+            logger.info(f"LLM 响应成功 (sync): response_length={len(response_text)}, reasoning_length={len(reasoning_content) if reasoning_content else 0}")
+
+            self._save_llm_log(
+                prompt=prompt,
+                response=response_text,
+                metadata={
+                    "reasoning_length": len(reasoning_content) if reasoning_content else 0
+                }
+            )
+
+            return response_text
+
+        except Exception as e:
+            error_msg = f"API 调用错误: {type(e).__name__}: {e}"
+            logger.error(error_msg)
+            self._save_llm_log(prompt=prompt, response=None, error=error_msg)
+            raise RuntimeError(error_msg) from e
 
     def _demo_response(self, prompt: str) -> str:
         """演示/开发用响应（仅在未配置 API key 时使用）"""
@@ -200,7 +214,7 @@ class AIAgentClient:
   {
     "title": "命运的开端",
     "chapter": "第一章",
-    "summary": "李云在村后禁地发现被追杀的神秘女子苏瑶，命运齿轮开始转动。苏瑶请求李云救她，李云做出了改变人生的决定。",
+    "summary": "李云在村后禁地发现被追杀的神秘女子苏瑶，命运齿轮开始转动。",
     "characters": ["李云", "苏瑶"],
     "emotion": "紧张",
     "importance": 9,
@@ -209,79 +223,19 @@ class AIAgentClient:
   {
     "title": "逃亡之路",
     "chapter": "第二章",
-    "summary": "苏瑶告知李云自己的身份和追杀者，两人连夜离开村子。暗影楼的杀手正在逼近。",
+    "summary": "苏瑶告知李云自己的身份和追杀者，两人连夜离开村子。",
     "characters": ["李云", "苏瑶", "暗影楼杀手"],
     "emotion": "紧张",
     "importance": 8,
     "content_ref": "苏瑶的真实身份，远比李云想象的要复杂得多..."
-  },
-  {
-    "title": "剑意初醒",
-    "chapter": "第三章",
-    "summary": "逃亡路上，苏瑶教导李云武艺。李云展现出剑心通明的天赋，暗影楼杀手再次出现。",
-    "characters": ["李云", "苏瑶", "暗影楼杀手"],
-    "emotion": "紧张",
-    "importance": 8,
-    "content_ref": "记住，剑不是用力量去挥舞的，而是用心..."
-  },
-  {
-    "title": "生死之战",
-    "chapter": "第四章",
-    "summary": "李云独自面对三名暗影楼高手，领悟剑心通明，以木剑击败敌人。苏瑶震惊于他的天赋。",
-    "characters": ["李云", "苏瑶"],
-    "emotion": "热血",
-    "importance": 9,
-    "content_ref": "那一刻，天地间仿佛只剩下这一剑..."
   }
 ]
 ```'''
         elif "关系" in prompt:
             return '''```json
 [
-  {
-    "source_id": "李云ID",
-    "target_id": "苏瑶ID",
-    "relation_type": "师徒",
-    "description": "苏瑶教导李云武艺，两人建立深厚的信任关系",
-    "strength": 8
-  },
-  {
-    "source_id": "李云ID",
-    "target_id": "暗影楼主ID",
-    "relation_type": "敌人",
-    "description": "暗影楼追杀苏瑶，李云因此与暗影楼为敌",
-    "strength": 9
-  },
-  {
-    "source_id": "苏瑶ID",
-    "target_id": "暗影楼主ID",
-    "relation_type": "敌人",
-    "description": "暗影楼追杀苏瑶，企图夺取天机阁秘密",
-    "strength": 10
-  }
-]
-```'''
-        elif "连接" in prompt:
-            return '''```json
-[
-  {
-    "source_id": "情节1ID",
-    "target_id": "情节2ID",
-    "connection_type": "cause",
-    "description": "李云救苏瑶导致被卷入纷争，必须逃亡"
-  },
-  {
-    "source_id": "情节2ID",
-    "target_id": "情节3ID",
-    "connection_type": "next",
-    "description": "逃亡过程中开始学习武艺"
-  },
-  {
-    "source_id": "情节3ID",
-    "target_id": "情节4ID",
-    "connection_type": "cause",
-    "description": "学习武艺展现天赋，为战斗做准备"
-  }
+  {"source_id": "李云", "target_id": "苏瑶", "relation_type": "师徒", "description": "苏瑶教导李云武艺", "strength": 8},
+  {"source_id": "李云", "target_id": "暗影楼主", "relation_type": "敌人", "description": "暗影楼追杀苏瑶", "strength": 9}
 ]
 ```'''
         elif "灵感" in prompt or "建议" in prompt:
@@ -289,32 +243,24 @@ class AIAgentClient:
 ## 写作灵感建议
 
 ### 1. 情节发展建议
-- 可以在李云与苏瑶的互动中增加更多情感层次，从最初的陌生到逐渐信任
-- 考虑添加一些小插曲展现李云的性格特点，如善良、勇敢
-- 暗影楼的威胁可以更加具体化，让读者感受到紧迫感
+- 可以在李云与苏瑶的互动中增加更多情感层次
+- 暗影楼的威胁可以更加具体化
 
 ### 2. 冲突设计
 - 内在冲突：李云对未知世界的恐惧与对冒险的渴望
-- 外在冲突：暗影楼的持续追杀与李云能力的不足
-- 可以设计一个两难选择：保护苏瑶还是保护村子？
+- 外在冲突：暗影楼的持续追杀
 
 ### 3. 伏笔建议
 - 李云的剑心通明天赋来源可以是一个伏笔
-- 苏瑶掌握的秘密可以逐步透露
-- 暗影楼主的身份可以设置悬念
-
-### 4. 人物塑造
-- 通过细节展现李云的成长：从一开始的慌乱到后来的冷静
-- 苏瑶的神秘感与人性温暖的平衡
-- 配角也可以有独特的性格特点
-
-### 5. 情绪渲染技巧
-- 使用环境描写烘托氛围：夕阳、迷雾、月光
-- 通过人物反应展现情绪：握紧拳头、呼吸急促
-- 对话中蕴含情感，而非直接说明
 """
         else:
             return "这是一个模拟响应。请检查API配置。"
+
+
+# 全局单例
+def get_ai_client() -> AIAgentClient:
+    """获取 AI 客户端单例"""
+    return AIAgentClient()
 
 
 # 向后兼容别名

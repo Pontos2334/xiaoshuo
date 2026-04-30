@@ -13,6 +13,7 @@ from app.models.schemas import (
 )
 from app.core.file_utils import safe_read_file
 from app.core.json_utils import JSONParser
+from app.core.text_sampler import sample_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -128,10 +129,10 @@ async def analyze_tension(novel_id: str, db: Session = Depends(get_db)):
             chapter_parts.append(f"=== 第{num}章 {title} ===\n{ch_content[:1500]}")
         chapters_text = "\n\n".join(chapter_parts)
     except Exception:
-        chapters_text = content[:8000]
+        chapters_text = sample_text(content, 8000)
 
     if not chapters_text:
-        chapters_text = content[:8000]
+        chapters_text = sample_text(content, 8000)
 
     try:
         from app.agent.client import ClaudeAgentClient

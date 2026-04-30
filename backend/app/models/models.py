@@ -1,8 +1,12 @@
 from sqlalchemy import Column, String, Integer, Float, Text, JSON, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.database import Base
 import uuid
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
 def generate_uuid():
@@ -20,8 +24,8 @@ class Novel(Base):
     outline_path = Column(String)
     chapter_count = Column(Integer, default=0)
     word_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 分析进度
     last_analyzed_chapter = Column(Integer, default=0)  # 已分析到第几章
@@ -59,8 +63,8 @@ class Character(Base):
     source = Column(String, default='ai')  # 'ai' | 'user' | 'ai_modified'
     ai_version = Column(Integer, default=1)  # AI分析版本号
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="characters")
@@ -122,8 +126,8 @@ class PlotNode(Base):
     source = Column(String, default='ai')  # 'ai' | 'user' | 'ai_modified'
     ai_version = Column(Integer, default=1)  # AI分析版本号
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="plot_nodes")
@@ -174,7 +178,7 @@ class Inspiration(Base):
     type = Column(String, nullable=False)  # plot, continue, character, emotion
     target_id = Column(String)  # 关联的情节/人物ID
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class Chapter(Base):
@@ -190,8 +194,8 @@ class Chapter(Base):
     status = Column(String, default="draft")  # draft / completed / revised
     summary = Column(Text)  # AI生成的章节摘要
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="chapters")
@@ -206,8 +210,8 @@ class ChatSession(Base):
     character_id = Column(String, ForeignKey("characters.id"), nullable=False)
     character_name = Column(String)  # 冗余存储，方便查询
     messages = Column(Text, default="[]")  # JSON array
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_active = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    last_active = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="chat_sessions")
@@ -224,7 +228,7 @@ class AnalysisTask(Base):
     progress = Column(Float, default=0)
     result = Column(Text)  # JSON
     error = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="analysis_tasks")
@@ -243,8 +247,8 @@ class WorldEntity(Base):
     rules = Column(Text)  # 规则/约束
     source = Column(String, default="ai")  # ai / manual
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # 关系
     novel = relationship("Novel", back_populates="world_entities")
@@ -304,8 +308,8 @@ class Foreshadow(Base):
     importance = Column(Integer, default=5)  # 1-10
     source = Column(String, default="ai")  # ai / user
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     novel = relationship("Novel", back_populates="foreshadows")
 
@@ -327,8 +331,8 @@ class CharacterArcPoint(Base):
     growth_notes = Column(Text)
     source = Column(String, default="ai")
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     character = relationship("Character", back_populates="arc_points")
     novel = relationship("Novel", back_populates="arc_points")
@@ -349,8 +353,8 @@ class TensionPoint(Base):
     cliffhanger_score = Column(Integer, nullable=True)  # 1-10
     source = Column(String, default="ai")
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     novel = relationship("Novel", back_populates="tension_points")
 
@@ -370,8 +374,8 @@ class OutlineNode(Base):
     sort_order = Column(Integer, default=0)
     ai_context = Column(JSON, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     novel = relationship("Novel", back_populates="outline_nodes")
     children = relationship("OutlineNode", back_populates="parent", cascade="all, delete-orphan")
